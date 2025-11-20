@@ -28,29 +28,11 @@
 
 from phc.env.tasks.humanoid import Humanoid
 from phc.env.tasks.humanoid_amp import HumanoidAMP
-from phc.env.tasks.humanoid_amp_getup import HumanoidAMPGetup
 from phc.env.tasks.humanoid_im import HumanoidIm, HumanoidImZ
-from phc.env.tasks.humanoid_im_getup import HumanoidImGetup
-from phc.env.tasks.humanoid_im_mcp import HumanoidImMCP
-from phc.env.tasks.humanoid_im_mcp_getup import HumanoidImMCPGetup
 from phc.env.tasks.vec_task_wrappers import VecTaskPythonWrapper
-from phc.env.tasks.humanoid_im_demo import HumanoidImDemo
-from phc.env.tasks.humanoid_im_mcp_demo import HumanoidImMCPDemo
-from phc.env.tasks.humanoid_im_distill import HumanoidImDistill
-from phc.env.tasks.humanoid_im_distill_getup import HumanoidImDistillGetup
-from phc.env.tasks.humanoid_speed import HumanoidSpeed, HumanoidSpeedZ
-from phc.env.tasks.humanoid_reach import HumanoidReach, HumanoidReachZ
-from phc.env.tasks.humanoid_strike import HumanoidStrike, HumanoidStrikeZ
-from phc.env.tasks.humanoid_pedestrian_terrain import HumanoidPedestrianTerrain, HumanoidPedestrianTerrainZ
-from phc.env.tasks.humanoid_im_interx import HumanoidImInterx
 from phc.env.tasks.humanoid_im_interx_helpup import HumanoidImInterxHelpUp
-from phc.env.tasks.humanoid_im_humanx_helpup import HumanoidImHumanxHelpUp
-from phc.env.tasks.humanoid_im_humanx_hhi_assist_bed import HumanoidImHumanxHelpUpBed
-from phc.env.tasks.humanoid_im_interx_dist import HumanoidImInterxDist
 from phc.env.tasks.humanoid_im_hhi_assist_bed import HumanoidAssistBed
 from phc.env.tasks.humanoid_im_interx_helpup_dist import HumanoidImInterxHelpUpDist
-from phc.env.tasks.humanoid_im_interx_assistmimic import HumanoidImInterxAssistMimic
-from phc.env.tasks.humanoid_im_hhiassist_assistmimic import HumanoidImHhiAssistAssistMimic
 
 
 from isaacgym import rlgpu

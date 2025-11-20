@@ -70,15 +70,8 @@ from learning import amp_agent
 from learning import amp_players
 from learning import amp_models
 from learning import amp_network_builder
-from learning import amp_network_mcp_builder
 from learning import amp_network_pnn_builder
 from learning import amp_network_pnn_multi_builder
-from learning import amp_network_humanx_pnn_builder
-from learning import amp_network_z_builder
-from learning import amp_network_z_reader_builder
-from learning import amp_network_sept_builder
-from learning import amp_network_assistmimic_builder
-from learning import amp_network_assistmimic2_builder
 
 from env.tasks import humanoid_amp_task
 import hydra

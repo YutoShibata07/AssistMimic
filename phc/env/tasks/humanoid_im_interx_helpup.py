@@ -25,6 +25,13 @@ from phc.utils.motion_lib_smpl import MotionLibSMPL
 from phc.utils.motion_lib_base import FixHeightMode
 from easydict import EasyDict
 
+# Import common utilities
+from phc.env.tasks.commons import (
+    normalize_quaternion_batch,
+    get_partner_env_ids,
+    get_motion_filename_from_data
+)
+
 
 class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
     """
@@ -241,21 +248,6 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
                     gymapi.ENV_SPACE
                 )
         return
-
-    def _get_head_height(self, env_id):
-        """Get head height for given environment ID"""
-        # Setup body name to ID mapping if not already done
-        if not hasattr(self, '_body_name_to_id'):
-            self._setup_body_name_to_id_mapping()
-        
-        head_height = 0.0
-        
-        if 'Head' in self._body_name_to_id:
-            body_id = self._body_name_to_id['Head']
-            if body_id < self._rigid_body_pos.shape[1]:
-                head_height = self._rigid_body_pos[env_id, body_id, 2].item()  # z-coordinate
-        
-        return head_height
 
 
     def _load_motion(self, motion_train_file, motion_test_file=[]):
@@ -712,7 +704,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         batch_size = len(env_ids)
 
         # Vectorized partner ID computation
-        partner_env_ids = torch.where(env_ids % 2 == 0, env_ids + 1, env_ids - 1)
+        partner_env_ids = get_partner_env_ids(env_ids)
 
         # Ensure all partner IDs are valid
         valid_mask = partner_env_ids < self.num_envs
@@ -846,7 +838,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
             env_ids = torch.tensor(env_ids, device=device)
 
         # Find partner environment IDs (vectorized pair logic: even/odd pairing)
-        partner_env_ids = torch.where(env_ids % 2 == 0, env_ids + 1, env_ids - 1)
+        partner_env_ids = get_partner_env_ids(env_ids)
 
         # Check if all partners exist
         valid_partners = partner_env_ids < self.num_envs
@@ -905,7 +897,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
             env_ids = torch.tensor(env_ids, device=device)
 
         # Find partner environment IDs (vectorized pair logic: even/odd pairing)
-        partner_env_ids = torch.where(env_ids % 2 == 0, env_ids + 1, env_ids - 1)
+        partner_env_ids = get_partner_env_ids(env_ids)
 
         # Check if all partners exist
         valid_partners = partner_env_ids < self.num_envs
@@ -936,8 +928,8 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         current_r_wrist_pos[current_is_recipient] = current_r_wrist_pos[current_is_recipient] + motion_cache_offset
 
         # Normalize wrist rotations (vectorized)
-        current_l_wrist_rot = self._normalize_quaternion_batch(current_l_wrist_rot)
-        current_r_wrist_rot = self._normalize_quaternion_batch(current_r_wrist_rot)
+        current_l_wrist_rot = normalize_quaternion_batch(current_l_wrist_rot)
+        current_r_wrist_rot = normalize_quaternion_batch(current_r_wrist_rot)
 
         # Compute partner joint positions relative to L_Wrist (vectorized)
         # partner_body_pos: [num_envs, num_bodies, 3]
@@ -965,32 +957,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         ], dim=1)  # [num_envs, num_bodies * 6]
 
         return wrist_relative_obs
-    
-    def _normalize_quaternion(self, quat):
-        """Normalize quaternion and handle edge cases"""
-        quat_norm = torch.norm(quat)
-        if quat_norm < 1e-6:  # quaternion is too small/zero
-            return torch.tensor([0.0, 0.0, 0.0, 1.0], device=quat.device)  # identity
-        else:
-            return quat / torch.clamp(quat_norm, min=1e-8)  # safe normalize
 
-    def _normalize_quaternion_batch(self, quat_batch):
-        """Normalize batch of quaternions and handle edge cases"""
-        # quat_batch: [N, 4]
-        quat_norms = torch.norm(quat_batch, dim=-1, keepdim=True)  # [N, 1]
-
-        # Handle small/zero quaternions
-        small_quat_mask = (quat_norms < 1e-6).squeeze(-1)  # [N]
-        identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=quat_batch.device, dtype=quat_batch.dtype)
-
-        # Safe normalize
-        normalized_quats = quat_batch / torch.clamp(quat_norms, min=1e-8)
-
-        # Replace small quaternions with identity
-        normalized_quats[small_quat_mask] = identity_quat
-
-        return normalized_quats
-    
     def _compute_partner_obs_v2(self, env_ids):
         """Compute partner observations v2 (existing implementation)"""
         # This should call the original implementation with partner_obs_v=2
@@ -1157,15 +1124,6 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
 
         return force_obs
 
-    def _get_reference_contact_obs_size(self):
-        """Calculate reference contact observation size"""
-        # Handle case where cfg is not fully initialized
-        if not hasattr(self, 'cfg') or self.cfg is None:
-            return 0
-        
-        # Reference contact difference has same size as hand contact
-        return self._get_hand_contact_obs_size()
-
     def _compute_hand_contact_obs(self, env_ids):
         """Compute hand contact observations for given environment IDs - FORCE-ONLY FOR SPEED"""
         hand_contact_bodies = self.cfg["env"].get("hand_contact_bodies", [])
@@ -1220,7 +1178,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
             env_ids_tensor = torch.as_tensor(env_ids, device=self.device)
 
             # Get partner env_ids (batch)
-            partner_env_ids = torch.where(env_ids_tensor % 2 == 0, env_ids_tensor + 1, env_ids_tensor - 1)
+            partner_env_ids = get_partner_env_ids(env_ids_tensor)
 
             # Check bounds (batch)
             valid_current = env_ids_tensor < self._rigid_body_pos.shape[0]
@@ -1687,76 +1645,6 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         return base_self_obs_size
 
 
-
-
-    def _compute_min_hand_distance(self, caregiver_env_id, recipient_env_id):
-        """Compute minimum distance between caregiver hands and recipient upper body joints"""
-        # Setup body name to ID mapping if not already done
-        if not hasattr(self, '_body_name_to_id'):
-            self._setup_body_name_to_id_mapping()
-        
-        # Caregiver hand body names
-        caregiver_hand_bodies = ['L_Wrist', 'R_Wrist']
-        
-        # Recipient upper body joint names
-        recipient_upper_body_joints = [
-            'Torso', 'Spine', 'Chest', 'Neck', 'Head',
-            'L_Thorax', 'L_Shoulder', 'L_Elbow', 'L_Wrist',
-            'R_Thorax', 'R_Shoulder', 'R_Elbow', 'R_Wrist'
-        ]
-        
-        min_distance = float('inf')
-        
-        # Get caregiver hand positions
-        caregiver_hand_positions = {}
-        for hand_name in caregiver_hand_bodies:
-            if hand_name in self._body_name_to_id:
-                body_id = self._body_name_to_id[hand_name]
-                if body_id < self._rigid_body_pos.shape[1]:
-                    caregiver_hand_positions[hand_name] = self._rigid_body_pos[caregiver_env_id, body_id, :3]  # Read-only, no clone needed
-        
-        # Get recipient upper body joint positions
-        recipient_upper_body_positions = {}
-        for joint_name in recipient_upper_body_joints:
-            if joint_name in self._body_name_to_id:
-                body_id = self._body_name_to_id[joint_name]
-                if body_id < self._rigid_body_pos.shape[1]:
-                    recipient_upper_body_positions[joint_name] = self._rigid_body_pos[recipient_env_id, body_id, :3].clone()  # Need clone since we modify with +=
-                    # recipientに対するoffsetを考慮にいれる
-                    recipient_upper_body_positions[joint_name] += torch.tensor([self.cfg["env"].get('env_spacing', 5.0) * 2, 0.0, 0.0], device=self.device)
-
-        # Compute distances between all caregiver hands and all recipient upper body joints
-        for caregiver_hand in caregiver_hand_positions:
-            for recipient_joint in recipient_upper_body_positions:
-                distance = torch.norm(caregiver_hand_positions[caregiver_hand] - 
-                                    recipient_upper_body_positions[recipient_joint]).item()
-                min_distance = min(min_distance, distance)
-        
-        return min_distance if min_distance != float('inf') else 10.0  # Fallback large distance
-
-    def _compute_root_distance(self, caregiver_env_id, recipient_env_id):
-        """Compute distance between caregiver and recipient root positions"""
-        # Get root positions
-        caregiver_root_pos = self._rigid_body_pos[caregiver_env_id, 0, :3]  # Read-only, no clone needed
-        recipient_root_pos = self._rigid_body_pos[recipient_env_id, 0, :3]  # Read-only, no clone needed
-        
-        # Apply motion cache offset compensation (same as in hand distance)
-        pair_offset_val = self.cfg["env"].get('env_spacing', 5.0) * 2
-        if recipient_env_id % 2 == 1:  # Recipient offset compensation
-            motion_cache_offset = torch.tensor([pair_offset_val, 0.0, 0.0], 
-                                             device=self.device, dtype=torch.float32)
-            recipient_root_pos = recipient_root_pos + motion_cache_offset
-        
-        if caregiver_env_id % 2 == 1:  # Caregiver offset compensation (shouldn't happen but safety)
-            motion_cache_offset = torch.tensor([pair_offset_val, 0.0, 0.0], 
-                                             device=self.device, dtype=torch.float32)
-            caregiver_root_pos = caregiver_root_pos + motion_cache_offset
-        
-        # Compute root-to-root distance
-        root_distance = torch.norm(caregiver_root_pos - recipient_root_pos).item()
-        
-        return root_distance
-
     def _compute_reward(self, actions):
         """Override to implement SimpleLiftUp reward or normal interaction reward"""
         # SimpleLiftUp mode: Check hand distances first
@@ -1848,7 +1736,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         env_ids = torch.arange(self.num_envs, device=self.device)
 
         # Vectorized partner ID computation: even -> +1, odd -> -1
-        partner_env_ids = torch.where(env_ids % 2 == 0, env_ids + 1, env_ids - 1)
+        partner_env_ids = get_partner_env_ids(env_ids)
 
         # Ensure partner IDs are within bounds
         valid_partners = partner_env_ids < self.num_envs
@@ -2582,7 +2470,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
     def _get_partner_reference_states(self, env_ids, ref_body_pos, ref_body_rot):
         """Get partner's reference states for relative position calculation"""
         # Simple approach: even env_id -> +1, odd env_id -> -1
-        partner_env_ids = torch.where(env_ids % 2 == 0, env_ids + 1, env_ids - 1)
+        partner_env_ids = get_partner_env_ids(env_ids)
         
         # Create mapping from env_id to batch index
         env_to_idx = {env_id.item(): i for i, env_id in enumerate(env_ids)}
@@ -2642,7 +2530,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
     def _get_partner_actual_body_positions(self, env_ids):
         """Get partner's current actual body positions"""
         # Simple approach: even env_id -> +1, odd env_id -> -1
-        partner_env_ids = torch.where(env_ids % 2 == 0, env_ids + 1, env_ids - 1)
+        partner_env_ids = get_partner_env_ids(env_ids)
         
         partner_body_pos_list = []
         pair_offset_val = self.cfg["env"].get('env_spacing', 5.0) * 2
@@ -3240,7 +3128,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
                     
                     if len(env_torque_data) > 0:
                         # Get motion filename from the stored motion information
-                        motion_filename = self._get_motion_filename_from_data(env_torque_data[0], env_id)
+                        motion_filename = get_motion_filename_from_data(env_torque_data[0], env_id)
                         
                         # Convert to numpy array [num_steps, num_joints]
                         torque_timeseries = np.array([data['torques'] for data in env_torque_data])
@@ -3262,56 +3150,3 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
                         
                         # Clear buffer for this environment
                         self.recipient_torque_buffer = [data for data in self.recipient_torque_buffer if data['env_id'] != env_id.item()]
-    
-    def _get_motion_filename_for_env(self, env_id):
-        """Get motion filename for the given environment"""
-        if hasattr(self, 'env_motion_assignments') and env_id.item() in self.env_motion_assignments:
-            motion_unique_id = self.env_motion_assignments[env_id.item()]
-            
-            # Try to get motion key from motion library
-            if hasattr(self._motion_lib, '_motion_data_keys') and len(self._motion_lib._motion_data_keys) > 0:
-                # Handle both integer and string motion_unique_id
-                try:
-                    if isinstance(motion_unique_id, str):
-                        # If motion_unique_id is string, look for it in keys
-                        if motion_unique_id in self._motion_lib._motion_data_keys:
-                            motion_key = motion_unique_id
-                        else:
-                            motion_key = str(motion_unique_id)
-                    else:
-                        # If motion_unique_id is integer, use as index
-                        if motion_unique_id < len(self._motion_lib._motion_data_keys):
-                            motion_key = self._motion_lib._motion_data_keys[motion_unique_id]
-                        else:
-                            motion_key = str(motion_unique_id)
-                    
-                    # Extract filename from key if it's a path-like string
-                    import os
-                    if isinstance(motion_key, str):
-                        motion_filename = os.path.splitext(os.path.basename(motion_key))[0]
-                        return f"env_{env_id.item()}_{motion_filename}"
-                    else:
-                        return f"env_{env_id.item()}_motion_{motion_key}"
-                except (IndexError, TypeError):
-                    # Handle any errors gracefully
-                    pass
-        
-        # Fallback to env_id only
-        return f"env_{env_id.item()}_motion"
-    
-    def _get_motion_filename_from_data(self, sample_data, env_id):
-        """Get motion filename from stored torque data"""
-        if sample_data.get('motion_key') is not None:
-            motion_key = sample_data['motion_key']
-            import os
-            if isinstance(motion_key, str):
-                motion_filename = os.path.splitext(os.path.basename(motion_key))[0]
-                return f"env_{env_id.item()}_{motion_filename}"
-            else:
-                return f"env_{env_id.item()}_motion_{motion_key}"
-        elif sample_data.get('motion_id') is not None:
-            motion_id = sample_data['motion_id']
-            return f"env_{env_id.item()}_motion_{motion_id}"
-        else:
-            # Fallback to env_id only
-            return f"env_{env_id.item()}_motion"
