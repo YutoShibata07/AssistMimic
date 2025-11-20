@@ -1,0 +1,185 @@
+# SimpleLiftUp Knowledge Distillation Environment Configuration
+# DAgger + PPO combined training with multiple teacher policies
+# Based on env_im_interx_simpleliftup.yaml with teacher policy support
+
+task: HumanoidImInterxDist
+motion_file: ""
+num_envs: 1024
+env_spacing: 5.0
+episode_length: 300
+debug_partner_obs: false
+
+# Interaction-specific settings
+humanoid_number: 2
+interaction_mode: true
+partner_obs_v: 3
+self_obs_v: 5
+enable_wrist_relative_obs: true
+interx_data_path: "../PHC/sample_data/interx_processed_fixed_v6_G009-011-012-029-044-045-046.pkl"
+
+# Teacher policy configuration for knowledge distillation
+# Multiple teacher policies trained on different groups
+teacher_policies:
+  G009:
+    checkpoint_path: "output/HumanoidIm/G009-Height-kp-1/Humanoid_00001600.pth"
+    obs_size: 2026  # PNN input size (adjust if needed)
+    action_size: 153
+  G011:
+    checkpoint_path: "output/HumanoidIm/G011-Height-kp-1/Humanoid_00000600.pth"
+    obs_size: 2026
+    action_size: 153
+  G012:
+    checkpoint_path: "output/HumanoidIm/G012-Height-kp-1/Humanoid_00000350.pth"
+    obs_size: 2026
+    action_size: 153
+  G029:
+    checkpoint_path: "output/HumanoidIm/G029-Height-kp-1/Humanoid_00000400.pth"
+    obs_size: 2026
+    action_size: 153
+  G044-045-046:
+    checkpoint_path: "output/HumanoidIm/G044-045-046-Height-kp-1/Humanoid_00000350.pth"
+    obs_size: 2026
+    action_size: 153
+  # G001-002-003:
+  #   checkpoint_path: "output/HumanoidIm/G001-002-003-Height-kp-1/Humanoid_00000950.pth"
+  #   obs_size: 2026
+  #   action_size: 153
+
+# Default teacher for unknown groups
+default_teacher_group: "G029"
+
+# Motion and tracking settings
+fut_tracks: false
+fut_tracks_dropout: false
+obs_v: 6
+auto_pmcp: false
+auto_pmcp_soft: true
+failed_motion_weight: false
+failed_weight_multiplier: 2.0
+eval_full: false
+
+# Reward settings - SIMPLIFIED to only task reward
+power_reward: false
+power_scale: 0.0
+power_coefficient: 0.0
+
+# Hand contact reward settings
+hand_contact_reward_weight: 1.0
+hand_contact_force_threshold: 0.1
+
+# Role-aware tracking reward curriculum settings - DISABLED
+caregiver_initial_weight: 0.0
+caregiver_final_weight: 0.0
+caregiver_curriculum_epoch: 0
+
+# Control settings
+control_mode: "isaac_pd"
+pdControl: true
+controlFrequencyInv: 2
+kp_scale: 1
+
+# State initialization
+stateInit: "Start"
+hybridInitProb: 0.5
+numAMPObsSteps: 10
+
+# Motion sampling settings
+seq_motions: true
+
+# Observation settings
+local_root_obs: true
+rootHeightObs: true
+key_bodies: ["R_Ankle", "L_Ankle", "R_Toe", "L_Toe", "R_Wrist", "L_Wrist"]
+
+# Extended contact bodies
+contact_bodies: [
+    "R_Ankle", "L_Ankle", "R_Toe", "L_Toe",
+    "R_Wrist", "L_Wrist",
+    "R_Index3", "L_Index3",
+    "R_Middle3", "L_Middle3",
+    "R_Ring3", "L_Ring3",
+    "R_Pinky3", "L_Pinky3",
+    "R_Thumb3", "L_Thumb3"
+]
+
+# Hand contact specific settings
+hand_contact_enabled: true
+hand_contact_threshold: 10
+hand_contact_bodies: ["R_Wrist", "L_Wrist", "R_Index3", "L_Index3", "R_Middle3", "L_Middle3", "R_Ring3", "L_Ring3", "R_Pinky3", "L_Pinky3", "R_Thumb3", "L_Thumb3"]
+
+# Reference contact difference feature
+reference_contact_enabled: true
+reference_contact_debug: false
+
+# Role flags feature
+role_flags_enabled: true
+
+# Reset and termination settings
+reset_bodies: ['Pelvis', 'L_Hip', 'L_Knee', 'L_Ankle', 'R_Hip', 'R_Knee', 'R_Ankle', 'Torso', 'Spine', 'Chest', 'Neck', 'Head', 'L_Thorax', 'L_Shoulder', 'R_Thorax', 'R_Shoulder']
+
+# Termination conditions
+terminationHeight: 0.15
+enableEarlyTermination: true
+terminationDistance: 0.5
+
+# Trajectory settings
+numTrajSamples: 10
+trajSampleTimestepInv: 5
+enableTaskObs: true
+
+# Asset settings
+asset:
+  assetRoot: "/"
+  assetFileName: "mjcf/smplx_humanoid.xml"
+
+# Mass scaling for recipient
+recipient_mass_scale: 0.7
+
+# Plane settings
+plane:
+  staticFriction: 1.0
+  dynamicFriction: 1.0
+  restitution: 0.0
+
+# Shape settings
+has_shape_obs: false
+has_shape_obs_disc: false
+has_shape_variation: false
+shape_resampling_interval: 250
+
+# Primitive settings
+num_prim: 1
+training_prim: 0
+actors_to_load: 0
+
+# Flags
+isFlagrun: false
+enable_debug_vis: false
+cycle_motion: false  # FIXED: Disabled to prevent _global_offset accumulation causing 10m offset bug
+hard_negative: false
+fitting: true
+only_kin_loss: false
+distill: true  # Enable distillation mode
+save_kin_info: false
+distill_z_model: false
+z_read: false
+real_weight: true
+remove_toe_im: false
+
+# SimpleLiftUp specific settings
+simple_lift_up_mode: true
+task_reward_only: true
+dense_height_reward: true
+
+# Hand contact validation settings
+zero_reward_on_poor_contact: false
+min_required_hand_contacts: 10
+
+# Partner relative position reward settings
+partner_rel_pos_weight: 0.0
+partner_rel_pos_k: 4.0
+
+# Random position offset disabled
+zero_out_far: false
+zero_out_far_train: false
+cycle_motion_xp: false

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot name="bed">
+  <link name="bed">
+    <!-- Simple bed box (190.5 L x 99.06 W x 40.72 H cm) -->
+    <visual>
+      <!-- center z = height / 2 = 0.4072 / 2 = 0.2036 -->
+      <origin xyz="0 0 0.2236"/>
+      <geometry>
+        <box size="1.905 0.9906 0.4572"/>
+      </geometry>
+      <material name="bed">
+        <color rgba="0.8 0.6 0.4 1"/>
+      </material>
+    </visual>
+
+    <!-- Collision geometry matches visual -->
+    <collision>
+      <origin xyz="0 0 0.2236"/>
+      <geometry>
+        <box size="1.905 0.9906 0.4572"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

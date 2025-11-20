@@ -1,0 +1,193 @@
+# SimpleLiftUp Environment configuration
+# Simplified dual-humanoid interaction focusing on lifting recipient using only recipient's root height as reward
+# Key changes:
+# 1. Disabled task observation (no Inter-X kinematics tracking)
+# 2. Only Task reward (recipient root height), no discriminator/contact rewards
+# 3. Lightweight recipient mass for easier lifting
+# 4. Early termination based on caregiver-recipient distance
+
+task: HumanoidImHhiAssistAssistMimic
+motion_file: ""
+num_envs: 1024
+env_spacing: 5.0
+episode_length: 300
+debug_partner_obs: false
+# Interaction-specific settings - Modified for SimpleLiftUp
+humanoid_number: 2  # Keep 2 humanoids per pair but adjust environment count
+interaction_mode: true
+partner_obs_v: 3  # Basic partner observation (SimpleLiftUp)
+self_obs_v: 5   
+enable_wrist_relative_obs: true
+hhi_assist_bed_data_path: "../PHC/sample_data/hhi-assist_processed_v6_AA-RM-wo-FullAssist.pkl" #"../PHC/sample_data/hhi-assist_processed_v6_AACG_RMCR_FullAssist_Take2.pkl" #"../PHC/sample_data/hhi-assist_processed_v6_AACG_RMCR_FullAssist_Take2.pkl"
+
+# Motion and tracking settings - DISABLED for SimpleLiftUp
+fut_tracks: false
+fut_tracks_dropout: false
+obs_v: 6
+auto_pmcp: false
+auto_pmcp_soft: true  # Enable soft PMCP - failed motion count accumulation
+failed_motion_weight: false  # Disable failed motion weighted sampling
+failed_weight_multiplier: 2.0  # Failed motions get 2x probability
+eval_full: false
+
+# Reward settings - SIMPLIFIED to only task reward
+power_reward: true  # Disabled for SimpleLiftUp
+power_scale: 1.0
+power_coefficient: 0.001
+caregiver_power_coefficient: 0.0005
+recipient_power_coefficient: 0.001
+
+caregiver_torque_reduction_reward: true
+
+# New reward to prevent caregiver from touching recipient head
+caregiver_touch_head_reward: false
+caregiver_touch_head_coefficient: 0.01
+caregiver_touch_threshold: 0.1
+
+# Hand contact reward settings (from multirl3)
+hand_contact_reward_weight: 1.0
+hand_contact_force_threshold: 0.1
+
+# Role-aware tracking reward curriculum settings - DISABLED
+caregiver_initial_weight: 0.0     # Disabled for SimpleLiftUp
+caregiver_final_weight: 0.0       # Disabled for SimpleLiftUp
+caregiver_curriculum_epoch: 0     # Disabled for SimpleLiftUp
+
+# Control settings
+control_mode: "isaac_pd"
+pdControl: true
+controlFrequencyInv: 2
+kp_scale: 1
+
+# State initialization - 一貫した初期位置のため"Start"を使用
+stateInit: "Start"  # "Random"から"Start"に変更
+hybridInitProb: 0.5
+numAMPObsSteps: 10
+
+# Motion sampling settings - ランダムサンプリングで失敗モーションを重み付け
+seq_motions: false  # Enable random motion sampling with weighted failed motions
+
+# Observation settings
+local_root_obs: true
+rootHeightObs: true
+key_bodies: ["R_Ankle", "L_Ankle", "R_Toe", "L_Toe", "R_Wrist", "L_Wrist"]
+
+# EXTENDED CONTACT BODIES - Keep for auxiliary features
+contact_bodies: [
+    "R_Ankle", "L_Ankle", "R_Toe", "L_Toe",          # Original foot contact
+    "R_Wrist", "L_Wrist",                             # Wrist contact
+    "R_Index3", "L_Index3",                           # Fingertip contact
+    "R_Middle3", "L_Middle3",                         # Middle finger contact
+    "R_Ring3", "L_Ring3",                             # Ring finger contact
+    "R_Pinky3", "L_Pinky3",                           # Pinky finger contact
+    "R_Thumb3", "L_Thumb3"                            # Thumb contact
+]
+
+# Hand contact specific settings - Keep for auxiliary features
+hand_contact_enabled: true
+hand_contact_threshold: 10
+hand_contact_bodies: ["R_Wrist", "L_Wrist", "R_Index3", "L_Index3", "R_Middle3", "L_Middle3", "R_Ring3", "L_Ring3", "R_Pinky3", "L_Pinky3", "R_Thumb3", "L_Thumb3"]
+
+# Reference contact difference feature - Keep for auxiliary features
+reference_contact_enabled: true  # Keep for aux_features
+reference_contact_debug: false
+
+# Role flags feature - Keep for auxiliary features
+role_flags_enabled: true         # Keep for aux_features
+
+# Reset and termination settings
+# reset_bodies: ['Pelvis', 'L_Hip', 'L_Knee', 'L_Ankle', 'R_Hip', 'R_Knee', 'R_Ankle', 'Torso', 'Spine', 'Chest', 'Neck', 'Head', 'L_Thorax', 'L_Shoulder', 'R_Thorax', 'R_Shoulder']
+reset_bodies: ['Pelvis', 'L_Hip', 'R_Hip', 'Torso', 'Spine', 'Chest', 'Neck', 'Head', 'L_Thorax', 'L_Shoulder', 'R_Thorax', 'R_Shoulder', 'L_Knee', 'R_Knee', 'L_Ankle', 'R_Ankle']
+
+# Termination conditions - Modified for SimpleLiftUp
+terminationHeight: 0.15
+enableEarlyTermination: true
+terminationDistance: 0.25  # Caregiver termination distance threshold
+terminationDistanceRecipient: 0.25  # Recipient termination distance threshold (stricter)
+
+ankle_height_termination_threshold: 1000 # Nullify the termination condition
+
+# Trajectory settings - DISABLED task observation
+numTrajSamples: 10
+trajSampleTimestepInv: 5
+enableTaskObs: true  # ENABLED: Required for correct PNN input dimensions (2026)
+
+# Asset settings - Modified for lightweight recipient
+asset:
+  assetRoot: "/"
+  assetFileName: "mjcf/smplx_humanoid.xml"
+
+# Furniture asset settings
+asset_name: "bed"  # Options: "bed" or "chair"
+# Mass scaling for recipient (make recipient lighter for easier lifting)
+recipient_mass_scale: 0.7  # Make recipient 10% of normal weight
+
+# Plane settings
+plane:
+  staticFriction: 1.0
+  dynamicFriction: 1.0
+  restitution: 0.0
+
+# Shape settings
+has_shape_obs: false
+has_shape_obs_disc: false
+has_shape_variation: false
+shape_resampling_interval: 250
+
+# Primitive settings
+num_prim: 1
+training_prim: 0
+actors_to_load: 0
+
+# Flags
+isFlagrun: false
+enable_debug_vis: false
+cycle_motion: false
+hard_negative: false
+fitting: false  # Disabled for SimpleLiftUp (no Inter-X tracking)
+only_kin_loss: false
+distill: false
+save_kin_info: false
+distill_z_model: false
+z_read: false
+real_weight: true
+remove_toe_im: false
+
+# SimpleLiftUp specific settings
+simple_lift_up_mode: true       # Flag to indicate SimpleLiftUp mode
+task_reward_only: true          # Only use task reward (recipient root height)
+dense_height_reward: true      # Dense reward based on recipient height each frame
+
+# Hand contact validation settings
+zero_reward_on_poor_contact: false    # Zero episode reward if insufficient hand contacts
+min_required_hand_contacts: 10        # Minimum good hand contacts required per episode
+
+# Partner relative position reward settings
+partner_rel_pos_weight: 0.0           # Weight for partner-relative position reward (0.0 = disabled)
+partner_rel_pos_k: 4.0                # Exponential decay parameter for partner-relative position reward
+
+# ランダムな位置オフセットを無効化
+zero_out_far: false
+zero_out_far_train: false
+cycle_motion_xp: false
+
+# SMPL Model Configuration - Force SMPL instead of SMPLX
+smpl_type: smplx  # Override to use SMPL parser for 10-dimensional betas
+
+# Trajectory tracking settings (RSI - Reference State Initialization)
+trajectory_tracking_pairs: 10  # Number of environment pairs to track (out of 256 pairs = 512 envs)
+                               # Memory usage: ~90% reduction (50 pairs vs 256 pairs)
+
+# Recipient assist force settings (PD control to help recipient follow reference motion)
+recipient_assist_enabled: false   # Enable/disable recipient assist forces
+caregiver_assist_enabled: false   # Enable/disable caregiver assist forces
+recipient_assist_kp_pos: 3000.0  # Position PD control gain (Kp)
+recipient_assist_kd_pos: 1000.0   # Velocity PD control gain (Kd)
+caregiver_assist_kp_pos: 3000.0  # Position PD control gain (Kp)
+caregiver_assist_kd_pos: 1000.0   # Velocity PD control gain (Kd)
+
+# Curriculum learning settings for recipient assist force
+curriculum_start_epoch: 100       # Start reducing Kp/Kd after this many epochs
+curriculum_duration_epochs: 500  # Duration over which to reduce Kp/Kd to final values
+curriculum_kp_pos_final: 0.0      # Final Kp value (linearly interpolated from initial)
+curriculum_kd_pos_final: 0.0      # Final Kd value (linearly interpolated from initial)

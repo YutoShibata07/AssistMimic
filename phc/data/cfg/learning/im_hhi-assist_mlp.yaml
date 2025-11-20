@@ -1,0 +1,122 @@
+params:
+  seed: 0
+
+  algo:
+    name: im_amp
+
+  model:
+    name: amp
+
+  network:
+    name: amp_pnn_multi
+    separate: True
+    discrete: False
+    weight_share: False  # When false, caregiver and recipient use separate weights after initialization
+    freeze_recipient: false
+    load_pretrained_phc: true
+
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: -2.9    # Default value for parent class
+        # Role-based sigma configuration
+        role_sigma:
+          caregiver_val: -2.9    # Caregiver: diverse exploration
+          recipient_val: -2.9 # Recipient: conservative stable movement
+        fixed_sigma: True
+        learn_sigma: False
+
+    # PNN configuration (main network for self + task obs)
+    mlp:
+      units: [2048, 1536, 1024, 1024, 512, 512] # Match checkpoint PNN units
+      activation: silu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    # Aux MLP configuration (for contact and partner features)
+    aux_mlp:
+      units: [2048, 1536, 1024, 1024, 512, 512]  # Smaller network for aux features
+      activation: silu
+      output_size: 153  # Match action space size
+      zero_init: False
+      debug_interval: 1000
+
+    # Finger joint filtering for aux_mlp input
+    filter_finger_joints: false  # Remove noisy finger joints (720 dims) from PNN output before aux_mlp
+    
+    # Asymmetric critic configuration
+    asymmetric_critic: false  # Use asymmetric critic with partner observations (default: false - same input as actor)
+
+    # Discriminator - Required by amp_network_builder but disabled for SimpleLiftUp
+    disc:
+      units: [1024, 512]
+      activation: relu
+      initializer:
+        name: default
+
+  # No checkpoint loading for SimpleLiftUp (fresh training)
+  load_checkpoint: False
+
+  config:
+    name: Humanoid
+    env_name: rlgpu
+    multi_gpu: False  # Disable rl_games multi_gpu, use PyTorch DDP instead
+    ppo: True
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    reward_shaper:
+      scale_value: 1
+    normalize_advantage: True
+    gamma: 0.99
+    tau: 0.95
+    learning_rate: 5e-6  # Higher learning rate for fresh training (caregiver default)
+    caregiver_learning_rate: 5e-6  # Learning rate for caregiver policy
+    recipient_learning_rate: 5e-6  # Learning rate for recipient policy
+    lr_schedule: constant
+    score_to_win: 20000
+    max_epochs: 10000000
+    save_best_after: 50
+    save_frequency: 50
+    print_stats: False
+    save_intermediate: True
+    entropy_coef: 0.0
+    truncate_grads: True
+    grad_norm: 50.0
+    e_clip: 0.2
+    horizon_length: 32
+    minibatch_size: 8192
+    mini_epochs: 6
+    critic_coef: 5
+    clip_value: False
+    
+    bounds_loss_coef: 10
+    
+    # SimpleLiftUp reward configuration
+    task_reward_w: 0.5  # Combined: tracking + recipient height + contact rewards
+    disc_reward_w: 0.5  # DISABLED: No discriminator reward
+    
+    # AMP settings (minimal for compatibility)
+    amp_obs_demo_buffer_size: 200000
+    amp_replay_buffer_size: 200000
+    amp_replay_keep_prob: 0.01
+    amp_batch_size: 512
+    amp_minibatch_size: 4096
+    disc_coef: 5
+    disc_logit_reg: 0.01
+    disc_grad_penalty: 5
+    disc_reward_scale: 2
+    disc_weight_decay: 0.0001
+    normalize_amp_input: True
+
+    player: 
+      games_num: 50000000
