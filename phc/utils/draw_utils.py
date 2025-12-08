@@ -15,7 +15,13 @@ def get_color_gradient(percent, color='Blues'):
 
 
 def agt_color(aidx):
-    return matplotlib.colors.to_rgb(plt.rcParams['axes.prop_cycle'].by_key()['color'][aidx % 10])
+    # Swap colors: env_id 0 -> orange (color 1), env_id 1 -> blue (color 0)
+    color_mapping = {0: 1, 1: 0}  # Map env_id to color index
+    if aidx in color_mapping:
+        color_idx = color_mapping[aidx]
+    else:
+        color_idx = aidx % 10
+    return matplotlib.colors.to_rgb(plt.rcParams['axes.prop_cycle'].by_key()['color'][color_idx])
 
 
 def draw_disk(img_size=80, max_r=10, iterations=3):

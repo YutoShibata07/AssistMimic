@@ -18,8 +18,8 @@ interaction_mode: true
 partner_obs_v: 3  # Basic partner observation (SimpleLiftUp)
 self_obs_v: 5   
 enable_wrist_relative_obs: true
-# interx_data_path: "../PHC/sample_data/interx_processed_fixed_v6_G011.pkl"
-interx_data_path: "sample_data/interx_processed_fixed_v9_cluster_ids_0_n_clusters_10.pkl"
+# interx_data_path: "sample_data/interx_processed_fixed_v9_cluster_ids_0_n_clusters_10.pkl"
+interx_data_path: "sample_data/interx_processed_fixed_v6_A019_G001_G002.pkl"
 
 # Motion and tracking settings - DISABLED for SimpleLiftUp
 fut_tracks: false

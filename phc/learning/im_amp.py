@@ -228,9 +228,6 @@ class IMAmpAgent(amp_agent.AMPAgent):
                 cr += r
                 steps += 1
 
-                # Track recipient head heights during contact for evaluation
-                self._track_eval_recipient_heights()
-
                 done, info = self._post_step_eval(info, done.clone())
 
                 all_done_indices = done.nonzero(as_tuple=False)
@@ -596,25 +593,3 @@ class IMAmpAgent(amp_agent.AMPAgent):
 
         return done, {"end": end, "eval_info": eval_info, "failed_keys": [],  "success_keys": []}
 
-    def _track_eval_recipient_heights(self):
-        """Track recipient head heights during evaluation, only when contact occurs"""
-        humanoid_env = self.vec_env.env.task
-        
-        # Only track if this is SimpleLiftUp mode
-        if not hasattr(humanoid_env, 'simple_lift_up_mode') or not humanoid_env.simple_lift_up_mode:
-            return
-        
-        for env_idx in range(humanoid_env.num_envs):
-            if env_idx % 2 == 1:  # Recipient environments (odd env_ids)
-                # Get current head height
-                head_height = humanoid_env._get_head_height(env_idx)
-                
-                # Check if there is contact between caregiver and recipient
-                caregiver_env_idx = env_idx - 1  # Caregiver is env_idx - 1
-                # has_contact = humanoid_env._check_caregiver_recipient_hand_contact(caregiver_env_idx, env_idx)
-                
-                # # Only update max height when contact is present (same logic as training)
-                # if has_contact and head_height > 0:
-                #     self.eval_episode_recipient_heights[env_idx] = max(
-                #         self.eval_episode_recipient_heights[env_idx], head_height
-                #     )
