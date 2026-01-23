@@ -116,7 +116,11 @@ asset:
   assetFileName: "mjcf/smplx_humanoid.xml"
 
 # Mass scaling for recipient (make recipient lighter for easier lifting)
-recipient_mass_scale: 0.7  # Make recipient 10% of normal weight
+recipient_mass_scale: 0.7  # Make recipient 70% of normal weight
+
+# Recipient weakness settings (reduce lower body strength)
+recipient_weakness_scale: 0.5       # Scale factor for stiffness and damping (0.5 = 50% strength)
+recipient_weakness_effort: 80.0     # Maximum effort (torque limit) for weakened DOFs
 
 # Plane settings
 plane:
@@ -187,3 +191,40 @@ curriculum_start_epoch: 100       # Start reducing Kp/Kd after this many epochs
 curriculum_duration_epochs: 500  # Duration over which to reduce Kp/Kd to final values
 curriculum_kp_pos_final: 0.0      # Final Kp value (linearly interpolated from initial)
 curriculum_kd_pos_final: 0.0      # Final Kd value (linearly interpolated from initial)
+
+# ===== Reward Hyperparameters (migrated from hardcoded values) =====
+
+# Partner reward integration weights
+partner_reward_integration:
+  recipient_self_weight: 1.0
+  recipient_partner_weight: 0.0
+  caregiver_self_weight: 0.5
+  caregiver_partner_weight: 0.5
+
+# Hand distance reward parameters
+hand_distance_reward:
+  distance_threshold: 0.4          # 40cm - threshold for close hands
+  exp_decay_rate: 2.5              # Exponential decay rate for distance reward
+  reward_coefficient: 0.5          # Weight for the exponential reward
+  close_hands_bonus: 0.05          # Additional bonus when hands are within threshold
+
+# Zero-out far mode transition distance
+zero_out_far_transition_distance: 0.25
+
+# Imitation reward scale for zero_out_far mode
+im_reward_scale: 0.5
+
+# Finger force reward threshold
+finger_force_threshold: 1.0
+
+# Maximum head height for reward calculation
+max_head_height_reward: 2.0
+
+# Hand contact proximity detection threshold
+hand_contact_proximity_threshold: 0.2
+
+# Force-based tracking activation distance threshold
+force_tracking_distance_threshold: 1.3
+
+# Joint movement threshold for tracking (meters)
+joint_movement_threshold: 0.01

@@ -51,7 +51,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         self.simple_lift_up_mode = cfg["env"].get("simple_lift_up_mode", False)
         self.task_reward_only = cfg["env"].get("task_reward_only", False)
         self.dense_height_reward = cfg["env"].get("dense_height_reward", False)
-        self.recipient_mass_scale = cfg["env"].get("recipient_mass_scale", 0.3)
+        self.recipient_mass_scale = cfg["env"].get("recipient_mass_scale", 0.7)
 
         # Failed motion weighted sampling settings
         self.failed_motion_weight = cfg["env"].get("failed_motion_weight", False)
@@ -155,7 +155,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         self.static_frames_counter = torch.zeros(self.num_envs, device=self.device, dtype=torch.int32)
         self.prev_joint_positions = None  # Will be initialized in first step
         self.STATIC_FRAME_THRESHOLD = 30  # 30 frames
-        self.JOINT_MOVEMENT_THRESHOLD = 0.01  # 1cm
+        self.JOINT_MOVEMENT_THRESHOLD = self.cfg["env"].get("joint_movement_threshold", 0.01)  # default 1cm
         
         # Initialize recipient assist force tensors
         if self.recipient_assist_enabled:
@@ -1150,7 +1150,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         
         force_contact = contact_magnitudes > hand_contact_threshold
         # # DISTANCE-BASED CONTACT CHECK COMMENTED OUT FOR SPEED:
-        distance_threshold = 0.2  # 20cm distance threshold
+        distance_threshold = self.cfg["env"].get("hand_contact_proximity_threshold", 0.2)  # default 20cm
         
         # Specific hand joints for distance check: Wrist
         specific_hand_joints = ['L_Wrist', 'R_Wrist']
@@ -1311,8 +1311,8 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         Returns:
             Adjusted ref_rb_pos_subset with caregiver hand positions modified
         """
-        # Only activate when caregiver-recipient root distance <= 0.7m
-        DISTANCE_THRESHOLD = 1.3
+        # Only activate when caregiver-recipient root distance <= threshold
+        DISTANCE_THRESHOLD = self.cfg["env"].get("force_tracking_distance_threshold", 1.3)
 
         # Identify caregiver and recipient pairs
         caregiver_mask = (env_ids % 2) == 0  # Even env_ids are caregivers
@@ -1717,9 +1717,15 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         env_ids = torch.arange(self.num_envs, device=self.device)
         is_recipient = (env_ids % 2 == 1)
 
-        # Create weight tensors
-        self_weights = torch.where(is_recipient, 1.0, 0.5)  # recipient=1.0, caregiver=0.5
-        partner_weights = torch.where(is_recipient, 0.0, 0.5)  # recipient=0.0, caregiver=0.5
+        # Create weight tensors from config
+        partner_integration = self.cfg["env"].get("partner_reward_integration", {})
+        recipient_self_w = partner_integration.get("recipient_self_weight", 1.0)
+        recipient_partner_w = partner_integration.get("recipient_partner_weight", 0.0)
+        caregiver_self_w = partner_integration.get("caregiver_self_weight", 0.5)
+        caregiver_partner_w = partner_integration.get("caregiver_partner_weight", 0.5)
+
+        self_weights = torch.where(is_recipient, recipient_self_w, caregiver_self_w)
+        partner_weights = torch.where(is_recipient, recipient_partner_w, caregiver_partner_w)
 
         # Combine rewards with role-based weights
         integrated_rewards = self_weights * current_rewards + partner_weights * partner_rewards
@@ -1774,7 +1780,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         # Use the provided hand distance masks and rewards (already calculated)
 
         if self.zero_out_far:
-            transition_distance = 0.25
+            transition_distance = self.cfg["env"].get("zero_out_far_transition_distance", 0.25)
             distance = torch.norm(root_pos - ref_root_pos, dim=-1)
 
             zeros_subset = distance > transition_distance
@@ -1792,8 +1798,9 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
                 ref_body_vel[~zeros_subset, :], ref_body_ang_vel[~zeros_subset, :], 
                 hand_distance_masks[~zeros_subset], self.reward_specs, env_ids=env_ids_subset)
 
-            self.rew_buf[~zeros_subset] = self.rew_buf[~zeros_subset] + im_reward * 0.5
-            self.reward_raw[~zeros_subset, :5] = self.reward_raw[~zeros_subset, :5] + im_reward_raw * 0.5
+            im_reward_scale = self.cfg["env"].get("im_reward_scale", 0.5)
+            self.rew_buf[~zeros_subset] = self.rew_buf[~zeros_subset] + im_reward * im_reward_scale
+            self.reward_raw[~zeros_subset, :5] = self.reward_raw[~zeros_subset, :5] + im_reward_raw * im_reward_scale
 
             # Add hand distance rewards when hands are close
             self.rew_buf += hand_rewards
@@ -1875,12 +1882,13 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
 
         left_finger_forces = self._contact_forces[:, left_finger_ids, :]  # [num_envs, num_left_fingers, 3]
         left_force_magnitudes = torch.norm(left_finger_forces, dim=-1)  # [num_envs, num_left_fingers]
-        left_force_rewards = torch.clamp(torch.exp(left_force_magnitudes - 1.0), max=1.0)  # [num_envs, num_left_fingers]
+        finger_force_threshold = self.cfg["env"].get("finger_force_threshold", 1.0)
+        left_force_rewards = torch.clamp(torch.exp(left_force_magnitudes - finger_force_threshold), max=1.0)  # [num_envs, num_left_fingers]
         left_force_multiplier = left_force_rewards.sum(dim=-1)  # [num_envs]
 
         right_finger_forces = self._contact_forces[:, right_finger_ids, :]  # [num_envs, num_right_fingers, 3]
         right_force_magnitudes = torch.norm(right_finger_forces, dim=-1)  # [num_envs, num_right_fingers]
-        right_force_rewards = torch.clamp(torch.exp(right_force_magnitudes - 1.0), max=1.0)  # [num_envs, num_right_fingers]
+        right_force_rewards = torch.clamp(torch.exp(right_force_magnitudes - finger_force_threshold), max=1.0)  # [num_envs, num_right_fingers]
         right_force_multiplier = right_force_rewards.sum(dim=-1)  # [num_envs]
         return left_force_multiplier, right_force_multiplier
 
@@ -1899,13 +1907,12 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         hand_rewards = torch.zeros(self.num_envs, device=self.device)
         hand_distance_masks = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        # Distance threshold (40cm = 0.4m)
-        distance_threshold = 0.4
-
-        # Exponential reward parameters (higher rewards for closer hands)
-        exp_decay_rate = 2.5  # Controls how fast the reward decays with distance
-        reward_coefficient = 0.5  # Weight for the exponential reward
-        close_hands_bonus = 0.05  # Additional bonus when hands are within threshold
+        # Hand distance reward parameters from config
+        hand_dist_cfg = self.cfg["env"].get("hand_distance_reward", {})
+        distance_threshold = hand_dist_cfg.get("distance_threshold", 0.4)  # default 40cm
+        exp_decay_rate = hand_dist_cfg.get("exp_decay_rate", 2.5)  # Controls how fast the reward decays with distance
+        reward_coefficient = hand_dist_cfg.get("reward_coefficient", 0.5)  # Weight for the exponential reward
+        close_hands_bonus = hand_dist_cfg.get("close_hands_bonus", 0.05)  # Additional bonus when hands are within threshold
 
         # Get upper body joint IDs
         upper_body_joints = [
@@ -2162,7 +2169,8 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
 
         # Simple height-based reward (heights seem to be in meters but starting low)
         # Encourage any upward movement from current position
-        height_rewards = reward_scale * torch.clamp(head_heights, min=0.0, max=2.0)
+        max_head_height = self.cfg["env"].get("max_head_height_reward", 2.0)
+        height_rewards = reward_scale * torch.clamp(head_heights, min=0.0, max=max_head_height)
 
         return height_rewards
 
@@ -2271,8 +2279,9 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         if self.control_mode != "isaac_pd":
             return  # Only works with Isaac PD control
         
-        # Get recipient weakness scale from config
+        # Get recipient weakness parameters from config
         recipient_weakness_scale = self.cfg["env"].get("recipient_weakness_scale", 0.5)
+        recipient_weakness_effort = self.cfg["env"].get("recipient_weakness_effort", 80.0)
             
         # Get lower body joint indices (DOF indices, not body indices)
         lower_body_joint_names = ['L_Hip', 'L_Knee', 'L_Ankle', 'L_Toe', 'R_Hip', 'R_Knee', 'R_Ankle', 'R_Toe']
@@ -2305,7 +2314,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
                 for dof_idx in lower_body_dof_indices:
                     dof_prop['stiffness'][dof_idx] *= recipient_weakness_scale
                     dof_prop['damping'][dof_idx] *= recipient_weakness_scale
-                    dof_prop['effort'][dof_idx] = 80.0
+                    dof_prop['effort'][dof_idx] = recipient_weakness_effort
                 # Apply modified properties
                 self.gym.set_actor_dof_properties(env_ptr, humanoid_handle, dof_prop)
                 modified_count += 1
