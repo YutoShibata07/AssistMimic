@@ -9,6 +9,7 @@ sys.path.append(os.getcwd())
 
 import numpy as np
 import torch
+import yaml
 from phc.utils.flags import flags
 from rl_games.algos_torch import torch_ext
 from phc.utils.running_mean_std import RunningMeanStd
@@ -312,7 +313,33 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                     else:
                         output_dir = "output/HumanoidIm/default_exp"
 
+                    # Add eval_subdir if specified
+                    eval_subdir = None
+                    if hasattr(self.env, 'task') and hasattr(self.env.task, 'cfg'):
+                        eval_subdir = self.env.task.cfg.get('eval_subdir', '')
+                    if eval_subdir:
+                        output_dir = os.path.join(output_dir, "evaluation", eval_subdir)
+
                     os.makedirs(output_dir, exist_ok=True)
+
+                    # Save evaluation configuration
+                    if eval_subdir and hasattr(self.env, 'task') and hasattr(self.env.task, 'cfg'):
+                        task_cfg = self.env.task.cfg
+                        env_cfg = task_cfg.get('env', {})
+                        eval_config = {
+                            "eval_subdir": eval_subdir,
+                            "recipient_mass_scale": env_cfg.get('recipient_mass_scale', 0.7),
+                            "recipient_weakness_scale": env_cfg.get('recipient_weakness_scale', 1.0),
+                            "kp_scale": env_cfg.get('kp_scale', 1.0),
+                            "kd_scale": env_cfg.get('kd_scale', 1.0),
+                            "num_envs": env_cfg.get('num_envs', 1024),
+                            "interx_data_path": env_cfg.get('interx_data_path', ''),
+                            "exp_name": exp_name,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        eval_config_path = os.path.join(output_dir, "eval_config.yaml")
+                        with open(eval_config_path, 'w') as f:
+                            yaml.dump(eval_config, f, default_flow_style=False)
 
                     # Create comprehensive results dictionary
                     results = {
@@ -326,6 +353,13 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         "avg_recipient_torque_succ": float(avg_recipient_torque_succ),
                         "per_joint_torque_all": per_joint_torque_all,
                         "per_joint_torque_succ": per_joint_torque_succ,
+                        "eval_config": {
+                            "eval_subdir": eval_subdir or "default",
+                            "recipient_mass_scale": self.env.task.recipient_mass_scale if hasattr(self.env.task, 'recipient_mass_scale') else 0.7,
+                            "recipient_weakness_scale": self.env.task.recipient_weakness_scale if hasattr(self.env.task, 'recipient_weakness_scale') else 1.0,
+                            "kp_scale": self.env.task._kp_scale if hasattr(self.env.task, '_kp_scale') else 1.0,
+                            "kd_scale": self.env.task._kd_scale if hasattr(self.env.task, '_kd_scale') else 1.0,
+                        },
                         "failed_keys_count": len(failed_keys),
                         "failed_keys": failed_keys.tolist() if hasattr(failed_keys, 'tolist') else list(failed_keys),
                         "network_path": self.config.get('network_path', '')
@@ -373,6 +407,10 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                     joblib.dump(failed_keys, osp.join(self.config['network_path'], "failed.pkl"))
                     joblib.dump(success_keys, osp.join(self.config['network_path'], "long_succ.pkl"))
                     print("....")
+
+                    # Exit after all motions have been evaluated once
+                    print("Evaluation complete. Exiting.")
+                    sys.exit(0)
 
                 done[:] = 1  # Turning all of the sequences done and reset for the next batch of eval.
 

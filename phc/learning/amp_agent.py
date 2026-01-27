@@ -113,8 +113,13 @@ class AMPAgent(common_agent.CommonAgent):
 
     def _setup_role_based_optimizers_fallback(self):
         """Fallback method to setup role-based optimizers"""
-        if hasattr(self, 'weight_share') and not self.weight_share and (float(self.caregiver_learning_rate) != float(self.recipient_learning_rate)):
-            print(f"Setting up role-based optimizers (fallback method)")
+        # Check freeze_recipient flag from network
+        freeze_recipient = False
+        if hasattr(self.model, 'a2c_network') and hasattr(self.model.a2c_network, 'freeze_recipient'):
+            freeze_recipient = self.model.a2c_network.freeze_recipient
+
+        if hasattr(self, 'weight_share') and not self.weight_share:
+            print(f"Setting up optimizers (freeze_recipient={freeze_recipient})")
             # Collect parameters for each role
             caregiver_params = []
             recipient_params = []
@@ -124,26 +129,39 @@ class AMPAgent(common_agent.CommonAgent):
                 if 'caregiver_aux_mlp' in name or 'caregiver_final_fc' in name:
                     caregiver_params.append(param)
                 elif 'recipient_aux_mlp' in name or 'recipient_final_fc' in name:
-                    recipient_params.append(param)
+                    if not freeze_recipient:
+                        recipient_params.append(param)
+                    else:
+                        print(f"  Excluding frozen: {name}")
                 else:
                     # Shared parameters (PNN, sigma, etc.) - add to both optimizers
                     shared_params.append(param)
 
-            # Create separate optimizers with different learning rates
-            caregiver_all_params = caregiver_params + shared_params
-            recipient_all_params = recipient_params + shared_params
+            if freeze_recipient:
+                # Single optimizer: caregiver + shared only
+                all_params = caregiver_params + shared_params
+                self.optimizer = optim.Adam(all_params, lr=float(self.caregiver_learning_rate),
+                                            eps=1e-08, weight_decay=self.weight_decay)
+                self.use_role_based_optimizers = False
+                print(f"Created caregiver-only optimizer ({len(all_params)} params, recipient frozen)")
+            elif float(self.caregiver_learning_rate) != float(self.recipient_learning_rate):
+                # Dual optimizers (existing behavior for different learning rates)
+                caregiver_all_params = caregiver_params + shared_params
+                recipient_all_params = recipient_params + shared_params
 
-            self.caregiver_optimizer = optim.Adam(caregiver_all_params, lr=float(self.caregiver_learning_rate),
-                                                eps=1e-08, weight_decay=self.weight_decay)
-            self.recipient_optimizer = optim.Adam(recipient_all_params, lr=float(self.recipient_learning_rate),
-                                                eps=1e-08, weight_decay=self.weight_decay)
+                self.caregiver_optimizer = optim.Adam(caregiver_all_params, lr=float(self.caregiver_learning_rate),
+                                                    eps=1e-08, weight_decay=self.weight_decay)
+                self.recipient_optimizer = optim.Adam(recipient_all_params, lr=float(self.recipient_learning_rate),
+                                                    eps=1e-08, weight_decay=self.weight_decay)
 
-            # Set primary optimizer to caregiver for compatibility
-            self.optimizer = self.caregiver_optimizer
-            self.use_role_based_optimizers = True
+                # Set primary optimizer to caregiver for compatibility
+                self.optimizer = self.caregiver_optimizer
+                self.use_role_based_optimizers = True
 
-            print(f"Created caregiver optimizer with {len(caregiver_all_params)} parameters")
-            print(f"Created recipient optimizer with {len(recipient_all_params)} parameters")
+                print(f"Created caregiver optimizer with {len(caregiver_all_params)} parameters")
+                print(f"Created recipient optimizer with {len(recipient_all_params)} parameters")
+            else:
+                self.use_role_based_optimizers = False
         else:
             self.use_role_based_optimizers = False
 

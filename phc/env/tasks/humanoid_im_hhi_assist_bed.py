@@ -2865,8 +2865,11 @@ class HumanoidAssistBed(HumanoidIm, RSIMixin):
         if self.control_mode != "isaac_pd":
             return  # Only works with Isaac PD control
         
-        # Get recipient weakness scale from config
+        # Get recipient weakness settings from config
         recipient_weakness_scale = self.cfg["env"].get("recipient_weakness_scale", 0.5)
+        recipient_weakness_effort = self.cfg["env"].get("recipient_weakness_effort", 80.0)
+        recipient_upper_body_effort = self.cfg["env"].get("recipient_upper_body_effort", 40.0)
+        recipient_hip_effort = self.cfg["env"].get("recipient_hip_effort", 20.0)
             
         # Get lower body joint indices (DOF indices, not body indices)
         lower_body_joint_names = ['L_Knee', 'L_Ankle', 'L_Toe', 'R_Knee', 'R_Ankle', 'R_Toe']
@@ -2919,21 +2922,21 @@ class HumanoidAssistBed(HumanoidIm, RSIMixin):
                 for dof_idx in lower_body_dof_indices:
                     dof_prop['stiffness'][dof_idx] *= recipient_weakness_scale
                     dof_prop['damping'][dof_idx] *= recipient_weakness_scale
-                    dof_prop['effort'][dof_idx] = 80
-                
+                    dof_prop['effort'][dof_idx] = recipient_weakness_effort
+
                 for dof_idx in upper_body_dof_indices:
                     dof_prop['stiffness'][dof_idx] *= recipient_weakness_scale
                     dof_prop['damping'][dof_idx] *= recipient_weakness_scale
-                    dof_prop['effort'][dof_idx] = 40
+                    dof_prop['effort'][dof_idx] = recipient_upper_body_effort
                 for dof_idx in hip_body_dof_indices:
                     dof_prop['stiffness'][dof_idx] *= recipient_weakness_scale
                     dof_prop['damping'][dof_idx] *= recipient_weakness_scale
-                    dof_prop['effort'][dof_idx] = 20
+                    dof_prop['effort'][dof_idx] = recipient_hip_effort
                 # Apply modified properties
                 self.gym.set_actor_dof_properties(env_ptr, humanoid_handle, dof_prop)
                 modified_count += 1
                 
-        print(f"Applied recipient weakness (scale={recipient_weakness_scale}) to {modified_count} recipients, affecting {len(lower_body_dof_indices)} lower body DOFs")
+        print(f"Applied recipient weakness (scale={recipient_weakness_scale}, effort: lower={recipient_weakness_effort}, upper={recipient_upper_body_effort}, hip={recipient_hip_effort}) to {modified_count} recipients, affecting {len(lower_body_dof_indices)} lower body DOFs")
 
 
     

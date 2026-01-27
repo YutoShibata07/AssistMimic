@@ -55,6 +55,10 @@ class AMPPNNMultiBuilder(AMPBuilder):
             # Freeze recipient configuration
             self.freeze_recipient = params.get("freeze_recipient", False)  # Default to False for backward compatibility
             print(f"DEBUG: freeze_recipient enabled: {self.freeze_recipient}")
+
+            # Residual mode configuration: aux_mlp random init, output = pnn + aux (no final_fc)
+            self.residual_mode = params.get("residual_mode", False)
+            print(f"DEBUG: residual_mode enabled: {self.residual_mode}")
             
             # Calculate base sizes
             # self.self_obs_size is already the base proprioception (778 dims)
@@ -267,12 +271,22 @@ class AMPPNNMultiBuilder(AMPBuilder):
                 )
                 self.aux_mlp.freeze_pnn(self.training_prim)
 
-                # Final fully connected layer (identity initialized)
-                self.final_fc = nn.Linear(kwargs['actions_num'] * 2, kwargs['actions_num'])
-                # Initialize as identity transformation
-                with torch.no_grad():
-                    self.final_fc.weight.zero_(); self.final_fc.bias.zero_()
-                    self.final_fc.weight[:, :kwargs['actions_num']] = torch.eye(kwargs['actions_num'])
+                if self.residual_mode:
+                    # Residual mode: no final_fc, output = pnn + aux
+                    self.final_fc = None
+                    # Zero-initialize aux_mlp output layer so initial output = pnn_output + 0
+                    with torch.no_grad():
+                        output_layer = self.aux_mlp.actors[0][-1]  # Last layer of first actor
+                        nn.init.zeros_(output_layer.weight)
+                        nn.init.zeros_(output_layer.bias)
+                    print("✓ Residual mode: final_fc is None, aux_mlp output layer zero-initialized")
+                else:
+                    # Final fully connected layer (identity initialized)
+                    self.final_fc = nn.Linear(kwargs['actions_num'] * 2, kwargs['actions_num'])
+                    # Initialize as identity transformation
+                    with torch.no_grad():
+                        self.final_fc.weight.zero_(); self.final_fc.bias.zero_()
+                        self.final_fc.weight[:, :kwargs['actions_num']] = torch.eye(kwargs['actions_num'])
             else:
                 # Separate weights - create separate PNNs for caregiver and recipient
                 self.caregiver_aux_mlp = PNN(
@@ -302,18 +316,30 @@ class AMPPNNMultiBuilder(AMPBuilder):
                 self.caregiver_aux_mlp.freeze_pnn(self.training_prim)
                 self.recipient_aux_mlp.freeze_pnn(self.training_prim)
 
-                # Final fully connected layers (identity initialized)
-                self.caregiver_final_fc = nn.Linear(kwargs['actions_num'] * 2, kwargs['actions_num'])
-                self.recipient_final_fc = nn.Linear(kwargs['actions_num'] * 2, kwargs['actions_num'])
+                if self.residual_mode:
+                    # Residual mode: no final_fc, output = pnn + aux
+                    self.caregiver_final_fc = None
+                    self.recipient_final_fc = None
+                    # Zero-initialize aux_mlp output layers so initial output = pnn_output + 0
+                    with torch.no_grad():
+                        for aux_mlp in [self.caregiver_aux_mlp, self.recipient_aux_mlp]:
+                            output_layer = aux_mlp.actors[0][-1]  # Last layer of first actor
+                            nn.init.zeros_(output_layer.weight)
+                            nn.init.zeros_(output_layer.bias)
+                    print("✓ Residual mode: final_fc layers are None, aux_mlp output layers zero-initialized")
+                else:
+                    # Final fully connected layers (identity initialized)
+                    self.caregiver_final_fc = nn.Linear(kwargs['actions_num'] * 2, kwargs['actions_num'])
+                    self.recipient_final_fc = nn.Linear(kwargs['actions_num'] * 2, kwargs['actions_num'])
 
-                # Initialize as identity transformation
-                with torch.no_grad():
-                    for fc in [self.caregiver_final_fc, self.recipient_final_fc]:
-                        # fc.weight.zero_(); fc.bias.zero_()
-                        # fc.weight[:, :kwargs['actions_num']] = torch.eye(kwargs['actions_num'])
-                        fc.weight[:,:kwargs['actions_num']] = torch.eye(kwargs['actions_num']) * 0.5
-                        fc.weight[:,kwargs['actions_num']:] = torch.eye(kwargs['actions_num']) * 0.5
-                        fc.bias.zero_()
+                    # Initialize as identity transformation
+                    with torch.no_grad():
+                        for fc in [self.caregiver_final_fc, self.recipient_final_fc]:
+                            # fc.weight.zero_(); fc.bias.zero_()
+                            # fc.weight[:, :kwargs['actions_num']] = torch.eye(kwargs['actions_num'])
+                            fc.weight[:,:kwargs['actions_num']] = torch.eye(kwargs['actions_num']) * 0.5
+                            fc.weight[:,kwargs['actions_num']:] = torch.eye(kwargs['actions_num']) * 0.5
+                            fc.bias.zero_()
 
                 # Keep references to shared aux_mlp and final_fc for compatibility
                 self.aux_mlp = self.caregiver_aux_mlp  # Default to caregiver for compatibility
@@ -1042,6 +1068,14 @@ class AMPPNNMultiBuilder(AMPBuilder):
                 print(f"  ✗ No trajectory_cnn weights found in checkpoint")
 
             # ===== Initialize aux_mlp weights from PNN (following humanx_pnn_builder approach) =====
+            # Skip aux_mlp weight loading in residual_mode (keep random initialization)
+            if self.residual_mode:
+                print("\n=== RESIDUAL MODE: Skipping aux_mlp weight initialization from PNN ===")
+                print("  aux_mlp will use random initialization (PyTorch default)")
+                print(f"✓ Additional modules loaded from experiment checkpoint (aux_mlp kept random)")
+                self.load_state_dict(current_state, strict=True)
+                return  # Skip aux_mlp weight loading
+
             print("\n=== Initializing aux_mlp weights from PNN ===")
 
             # Check if caregiver_aux_mlp/recipient_aux_mlp exist in checkpoint
@@ -1464,24 +1498,35 @@ class AMPPNNMultiBuilder(AMPBuilder):
             #     print(f"DEBUG: PNN output stats - mean: {main_features.mean().item():.4f}, std: {main_features.std().item():.4f}")
 
             if self.weight_share:
-                # Combine PNN output with aux_mlp output
-                combined_features = torch.cat([main_features, aux_mlp_output], dim=1)
-                a_out = self.final_fc(combined_features)
+                if self.residual_mode:
+                    # Residual mode: simple addition of PNN and aux_mlp outputs
+                    a_out = main_features + aux_mlp_output
+                else:
+                    # Combine PNN output with aux_mlp output via final_fc
+                    combined_features = torch.cat([main_features, aux_mlp_output], dim=1)
+                    a_out = self.final_fc(combined_features)
             else:
-                # For separate weights, use role-specific final layers
+                # For separate weights, use role-specific processing
                 batch_size = obs.shape[0]
                 a_out = torch.zeros(batch_size, main_features.shape[1], device=obs.device)
 
-                if caregiver_mask.any():
-                    # caregiver_combined = torch.cat([main_features[caregiver_mask], aux_mlp_output[caregiver_mask]], dim=1)
-                    # a_out[caregiver_mask] = self.caregiver_final_fc(caregiver_combined)
-                    a_out[caregiver_mask] = aux_mlp_output[caregiver_mask]
+                if self.residual_mode:
+                    # Residual mode: simple addition of PNN and aux_mlp outputs
+                    if caregiver_mask.any():
+                        a_out[caregiver_mask] = main_features[caregiver_mask] + aux_mlp_output[caregiver_mask]
+                    if recipient_mask.any():
+                        a_out[recipient_mask] = main_features[recipient_mask] + aux_mlp_output[recipient_mask]
+                else:
+                    if caregiver_mask.any():
+                        # caregiver_combined = torch.cat([main_features[caregiver_mask], aux_mlp_output[caregiver_mask]], dim=1)
+                        # a_out[caregiver_mask] = self.caregiver_final_fc(caregiver_combined)
+                        a_out[caregiver_mask] = aux_mlp_output[caregiver_mask]
 
-                if recipient_mask.any():
-                    a_out[recipient_mask] = aux_mlp_output[recipient_mask]
-                    # else:
-                        # recipient_combined = torch.cat([main_features[recipient_mask], aux_mlp_output[recipient_mask]], dim=1)
-                        # a_out[recipient_mask] = self.recipient_final_fc(recipient_combined)
+                    if recipient_mask.any():
+                        a_out[recipient_mask] = aux_mlp_output[recipient_mask]
+                        # else:
+                            # recipient_combined = torch.cat([main_features[recipient_mask], aux_mlp_output[recipient_mask]], dim=1)
+                            # a_out[recipient_mask] = self.recipient_final_fc(recipient_combined)
 
             # Debug: Check for NaN/Inf values
             if torch.isnan(main_features).any() or torch.isinf(main_features).any():
@@ -1705,3 +1750,10 @@ class AMPPNNMultiBuilder(AMPBuilder):
 
             # Return processed observation: [base_obs, processed_aux_features]
             return torch.cat([base_obs, aux_features_without_future_traj], dim=1)
+
+        def train(self, mode=True):
+            """Override to keep recipient_aux_mlp in eval mode when frozen"""
+            super().train(mode)
+            if self.freeze_recipient and hasattr(self, 'recipient_aux_mlp') and self.recipient_aux_mlp is not None:
+                self.recipient_aux_mlp.eval()
+            return self

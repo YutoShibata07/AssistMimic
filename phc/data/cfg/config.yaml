@@ -35,6 +35,7 @@ debug: False
 follow: False
 add_proj: False
 real_traj: False
+eval_subdir: ""  # Subdirectory for evaluation results (e.g., "normal", "mass-1.2")
 
 hydra:
   job:

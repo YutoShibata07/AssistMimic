@@ -18,7 +18,7 @@ interaction_mode: true
 partner_obs_v: 3  # Basic partner observation (SimpleLiftUp)
 self_obs_v: 5   
 enable_wrist_relative_obs: true
-hhi_assist_bed_data_path: "../PHC/sample_data/hhi-assist_processed_v6_AARM_JBBC_EDGG-new.pkl" #"../PHC/sample_data/hhi-assist_processed_v6_AACG_RMCR_FullAssist_Take2.pkl" #"../PHC/sample_data/hhi-assist_processed_v6_AACG_RMCR_FullAssist_Take2.pkl"
+hhi_assist_bed_data_path: "sample_data/hhi-assist_processed_v6_AA-RM-wo-FullAssist.pkl" #"../PHC/sample_data/hhi-assist_processed_v6_AACG_RMCR_FullAssist_Take2.pkl" #"../PHC/sample_data/hhi-assist_processed_v6_AACG_RMCR_FullAssist_Take2.pkl"
 
 # Motion and tracking settings - DISABLED for SimpleLiftUp
 fut_tracks: false
@@ -121,6 +121,12 @@ asset:
 asset_name: "bed"  # Options: "bed" or "chair"
 # Mass scaling for recipient (make recipient lighter for easier lifting)
 recipient_mass_scale: 0.7  # Make recipient 10% of normal weight
+
+# Recipient weakness settings (reduce lower body strength)
+recipient_weakness_scale: 0.5         # Scale factor for stiffness/damping
+recipient_weakness_effort: 80.0       # Maximum effort for weakened DOFs (lower body)
+recipient_upper_body_effort: 40.0     # Maximum effort for upper body DOFs
+recipient_hip_effort: 20.0            # Maximum effort for hip DOFs (default 20, use 10 for eval)
 
 # Plane settings
 plane:

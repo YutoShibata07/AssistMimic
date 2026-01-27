@@ -12,7 +12,8 @@ params:
     separate: True
     discrete: False
     weight_share: False  # When false, caregiver and recipient use separate weights after initialization
-    freeze_recipient: false
+    freeze_recipient: false  # When true, freeze recipient network
+    residual_mode: false     # Ablation: aux_mlp random init, output = pnn + aux
     load_pretrained_phc: true
 
     space:
