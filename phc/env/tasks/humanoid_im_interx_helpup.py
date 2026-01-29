@@ -53,6 +53,9 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         self.dense_height_reward = cfg["env"].get("dense_height_reward", False)
         self.recipient_mass_scale = cfg["env"].get("recipient_mass_scale", 0.7)
 
+        # Recipient kinematic replay mode
+        self.recipient_kinematic_replay = cfg["env"].get("recipient_kinematic_replay", False)
+
         # Failed motion weighted sampling settings
         self.failed_motion_weight = cfg["env"].get("failed_motion_weight", False)
         self.failed_weight_multiplier = cfg["env"].get("failed_weight_multiplier", 2.0)
@@ -170,9 +173,83 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         # Previous actions for aux_features (initialized after parent class sets num_actions)
         self.prev_actions = torch.zeros(self.num_envs, self.num_actions, device=self.device)
 
+        # Kinematic replay: cache recipient env/actor IDs
+        if self.recipient_kinematic_replay:
+            self._kin_replay_recipient_env_ids = torch.arange(self.num_envs, device=self.device)[
+                torch.arange(self.num_envs, device=self.device) % 2 == 1
+            ]
+            self._kin_replay_recipient_actor_ids = self._humanoid_actor_ids[self._kin_replay_recipient_env_ids]
+            print("[KinReplay] Recipient kinematic replay mode ENABLED")
 
         return
     
+    def _physics_step(self):
+        if not self.recipient_kinematic_replay:
+            return super()._physics_step()
+
+        for i in range(self.control_freq_inv):
+            self.control_i = i
+            self.render()
+            if not self.paused and self.enable_viewer_sync:
+                if self.control_mode == "pd":
+                    self.torques = self._compute_torques(self.pd_tar)
+                    self.gym.set_dof_actuation_force_tensor(
+                        self.sim, gymtorch.unwrap_tensor(self.torques))
+                    self.gym.simulate(self.sim)
+                    if self.device == 'cpu':
+                        self.gym.fetch_results(self.sim, True)
+                    self.gym.refresh_dof_state_tensor(self.sim)
+                else:
+                    self.gym.simulate(self.sim)
+
+                # Force-set recipient states after each simulate()
+                self._set_recipient_kinematic_state()
+        return
+
+    def _set_recipient_kinematic_state(self):
+        """Force recipient state to reference motion each physics substep (kinematic replay)."""
+        env_ids = self._kin_replay_recipient_env_ids
+
+        # Compute motion time (same as _compute_assist_forces)
+        motion_times = (self.progress_buf[env_ids].float() * self.dt
+                        + self._motion_start_times[env_ids]
+                        + self._motion_start_times_offset[env_ids])
+
+        # Get reference motion state (apply pair offset like _get_state_from_motionlib_cache)
+        pair_offset_val = self.cfg["env"].get('env_spacing', 5.0) * 2
+        offset = self._global_offset[env_ids].clone()
+        offset[:, 0] -= pair_offset_val  # All env_ids here are recipients
+        motion_res = self._motion_lib.get_motion_state(
+            self._sampled_motion_ids[env_ids],
+            motion_times,
+            offset=offset
+        )
+
+        # Overwrite root state
+        self._humanoid_root_states[env_ids, 0:3] = motion_res["root_pos"]
+        self._humanoid_root_states[env_ids, 3:7] = motion_res["root_rot"]
+        self._humanoid_root_states[env_ids, 7:10] = motion_res["root_vel"]
+        self._humanoid_root_states[env_ids, 10:13] = motion_res["root_ang_vel"]
+
+        # Overwrite DOF state
+        self._dof_pos[env_ids] = motion_res["dof_pos"]
+        self._dof_vel[env_ids] = motion_res["dof_vel"]
+
+        # Apply to IsaacGym simulation
+        actor_ids = self._kin_replay_recipient_actor_ids
+        self.gym.set_actor_root_state_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self._root_states),
+            gymtorch.unwrap_tensor(actor_ids),
+            len(actor_ids)
+        )
+        self.gym.set_dof_state_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self._dof_state),
+            gymtorch.unwrap_tensor(actor_ids),
+            len(actor_ids)
+        )
+
     def _build_termination_heights(self):
         """Override to set different termination distances for caregiver and recipient"""
         super()._build_termination_heights()

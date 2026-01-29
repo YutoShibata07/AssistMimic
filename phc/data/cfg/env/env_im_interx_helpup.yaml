@@ -179,6 +179,9 @@ trajectory_tracking_pairs: 10  # Number of environment pairs to track (out of 25
                                # Memory usage: ~90% reduction (50 pairs vs 256 pairs)
 
 # Recipient assist force settings (PD control to help recipient follow reference motion)
+recipient_kinematic_replay: false   # When true, recipient follows reference motion kinematically (single-agent RL baseline)
+
+# Recipient assist force settings (PD control to help recipient follow reference motion)
 recipient_assist_enabled: false   # Enable/disable recipient assist forces
 caregiver_assist_enabled: false   # Enable/disable caregiver assist forces
 recipient_assist_kp_pos: 3000.0  # Position PD control gain (Kp)
