@@ -47,12 +47,18 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
             self.pbar = tqdm(range(humanoid_env._motion_lib._num_unique_motions // humanoid_env.num_envs))
             humanoid_env.zero_out_far = False
             humanoid_env.zero_out_far_train = False
-            
+
             # if len(humanoid_env._reset_bodies_id) > 15:
-            #     humanoid_env._reset_bodies_id = humanoid_env._eval_track_bodies_id  # Following UHC. Only do it for full body, not for three point/two point trackings. 
-            
+            #     humanoid_env._reset_bodies_id = humanoid_env._eval_track_bodies_id  # Following UHC. Only do it for full body, not for three point/two point trackings.
+
             humanoid_env.cycle_motion = False
             self.print_stats = False
+
+            # Evaluation metrics storage for recipient burden and stability
+            self.episode_max_torques_all = []  # Max torque per episode (all)
+            self.episode_com_stability_all = []  # COM stability per episode (all)
+            self.episode_com_stability_xy_all = []  # COM stability (xy) per episode (all)
+            self.episode_motion_ids = []  # Motion ID for each episode (for intersection analysis)
         
         # joblib.dump({"mlp": self.model.a2c_network.actor_mlp, "mu": self.model.a2c_network.mu}, "single_model.pkl") # ZL: for saving part of the model.
         return
@@ -119,7 +125,21 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                 self.mpjpe_all.append(all_mpjpe)
                 self.pred_pos_all += all_body_pos_pred
                 self.gt_pos_all += all_body_pos_gt
-                
+
+                # Collect evaluation metrics (max torque, COM stability) for this batch
+                # Metrics are already recipient-only from get_episode_evaluation_metrics()
+                if hasattr(humanoid_env, 'get_episode_evaluation_metrics'):
+                    eval_metrics = humanoid_env.get_episode_evaluation_metrics()
+                    # Store metrics for recipients in this batch
+                    self.episode_max_torques_all.extend(eval_metrics['max_torques'].cpu().numpy().tolist())
+                    self.episode_com_stability_all.extend(eval_metrics['com_stability'].cpu().numpy().tolist())
+                    self.episode_com_stability_xy_all.extend(eval_metrics['com_stability_xy'].cpu().numpy().tolist())
+                    # Store motion IDs for recipients only (odd indices: 1, 3, 5, ...)
+                    all_motion_ids = humanoid_env._motion_lib._curr_motion_ids.cpu().numpy()
+                    recipient_motion_ids = all_motion_ids[1::2].tolist()  # Every other starting from index 1
+                    self.episode_motion_ids.extend(recipient_motion_ids)
+                    # Reset metrics for next batch
+                    humanoid_env.reset_episode_evaluation_metrics()
 
                 if (humanoid_env.start_idx + humanoid_env.num_envs >= humanoid_env._motion_lib._num_unique_motions):
                     terminate_hist = np.concatenate(self.terminate_memory)
@@ -269,6 +289,54 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                                 per_joint_torque_all['joint_names'] = joint_names
                                 per_joint_torque_succ['joint_names'] = joint_names
 
+                    # Calculate new evaluation metrics (max torque, COM stability)
+                    # These metrics are already computed for recipients only in humanoid_im_hhi_assist_bed.py
+                    max_torque_all_mean = 0.0
+                    max_torque_succ_mean = 0.0
+                    com_stability_all_mean = 0.0
+                    com_stability_succ_mean = 0.0
+                    com_stability_xy_all_mean = 0.0
+                    com_stability_xy_succ_mean = 0.0
+
+                    # Per-episode data for saving (for intersection analysis between policies)
+                    per_episode_metrics = {}
+
+                    if len(self.episode_max_torques_all) > 0:
+                        num_unique = humanoid_env._motion_lib._num_unique_motions
+                        num_recipients = num_unique // 2  # Recipients are half of total (paired setup)
+
+                        # Data is already recipient-only from get_episode_evaluation_metrics()
+                        max_torques = np.array(self.episode_max_torques_all[:num_recipients])
+                        com_stab = np.array(self.episode_com_stability_all[:num_recipients])
+                        com_stab_xy = np.array(self.episode_com_stability_xy_all[:num_recipients])
+
+                        # All recipients mean
+                        max_torque_all_mean = float(np.mean(max_torques))
+                        com_stability_all_mean = float(np.mean(com_stab))
+                        com_stability_xy_all_mean = float(np.mean(com_stab_xy))
+
+                        # Successful recipients mean
+                        # succ_idxes contains global env_ids (0,1,2,...), recipients are odd (1,3,5,...)
+                        # Convert to recipient local indices: env_id 1->0, 3->1, 5->2, etc.
+                        recipient_succ_local_indices = [i // 2 for i in succ_idxes if i % 2 == 1]
+                        if len(recipient_succ_local_indices) > 0:
+                            max_torque_succ_mean = float(np.mean(max_torques[recipient_succ_local_indices]))
+                            com_stability_succ_mean = float(np.mean(com_stab[recipient_succ_local_indices]))
+                            com_stability_xy_succ_mean = float(np.mean(com_stab_xy[recipient_succ_local_indices]))
+
+                        # Store per-episode metrics for intersection analysis (recipients only)
+                        # success_mask: for each recipient, whether corresponding pair succeeded
+                        # Recipient i corresponds to global env_ids (2*i, 2*i+1), success if recipient (2*i+1) succeeded
+                        recipient_success_mask = [(2*i+1) in succ_idxes for i in range(num_recipients)]
+                        recipient_motion_ids = self.episode_motion_ids[:num_recipients]
+                        per_episode_metrics = {
+                            'motion_ids': recipient_motion_ids,
+                            'max_torques': max_torques.tolist(),
+                            'com_stability': com_stab.tolist(),
+                            'com_stability_xy': com_stab_xy.tolist(),
+                            'success_mask': recipient_success_mask,
+                        }
+
                     print("------------------------------------------")
                     print("------------------------------------------")
                     print(f"Success Rate: {self.success_rate:.10f}")
@@ -278,6 +346,15 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         print("Recipient All: ", " \t".join([f"{k}: {v:.3f}" for k, v in metrics_recipient_print.items()]))
                     if metrics_recipient_succ_print:
                         print("Recipient Succ: "," \t".join([f"{k}: {v:.3f}" for k, v in metrics_recipient_succ_print.items()]))
+
+                    # Print new evaluation metrics (max torque, COM stability)
+                    print(f"\n--- Recipient Burden & Stability Metrics ---")
+                    print(f"Max Torque (All):  {max_torque_all_mean:.3f}")
+                    print(f"Max Torque (Succ): {max_torque_succ_mean:.3f}")
+                    print(f"COM Stability (All):  {com_stability_all_mean:.4f}")
+                    print(f"COM Stability (Succ): {com_stability_succ_mean:.4f}")
+                    print(f"COM Stability XY (All):  {com_stability_xy_all_mean:.4f}")
+                    print(f"COM Stability XY (Succ): {com_stability_xy_succ_mean:.4f}")
 
                     # Print top 5 joints with highest average torque (if available)
                     if per_joint_torque_succ and 'mean_abs' in per_joint_torque_succ:
@@ -335,7 +412,8 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                             "num_envs": env_cfg.get('num_envs', 1024),
                             "interx_data_path": env_cfg.get('interx_data_path', ''),
                             "exp_name": exp_name,
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": datetime.now().isoformat(),
+                            "enable_adjust_caregiver_hand_reference": env_cfg.get('enable_adjust_caregiver_hand_reference', True)
                         }
                         eval_config_path = os.path.join(output_dir, "eval_config.yaml")
                         with open(eval_config_path, 'w') as f:
@@ -353,12 +431,22 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         "avg_recipient_torque_succ": float(avg_recipient_torque_succ),
                         "per_joint_torque_all": per_joint_torque_all,
                         "per_joint_torque_succ": per_joint_torque_succ,
+                        # New evaluation metrics (recipient burden & stability)
+                        "max_torque_all": float(max_torque_all_mean),
+                        "max_torque_succ": float(max_torque_succ_mean),
+                        "com_stability_all": float(com_stability_all_mean),
+                        "com_stability_succ": float(com_stability_succ_mean),
+                        "com_stability_xy_all": float(com_stability_xy_all_mean),
+                        "com_stability_xy_succ": float(com_stability_xy_succ_mean),
+                        # Per-episode metrics for intersection analysis between policies
+                        "per_episode_metrics": per_episode_metrics,
                         "eval_config": {
                             "eval_subdir": eval_subdir or "default",
                             "recipient_mass_scale": self.env.task.recipient_mass_scale if hasattr(self.env.task, 'recipient_mass_scale') else 0.7,
                             "recipient_weakness_scale": self.env.task.recipient_weakness_scale if hasattr(self.env.task, 'recipient_weakness_scale') else 1.0,
                             "kp_scale": self.env.task._kp_scale if hasattr(self.env.task, '_kp_scale') else 1.0,
                             "kd_scale": self.env.task._kd_scale if hasattr(self.env.task, '_kd_scale') else 1.0,
+                            "enable_adjust_caregiver_hand_reference": self.env.task.enable_adjust_caregiver_hand_reference if hasattr(self.env.task, 'enable_adjust_caregiver_hand_reference') else True,
                         },
                         "failed_keys_count": len(failed_keys),
                         "failed_keys": failed_keys.tolist() if hasattr(failed_keys, 'tolist') else list(failed_keys),
@@ -388,7 +476,15 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                             f.write(f"Recipient All:  " + " \t".join([f"{k}: {v:.3f}" for k, v in metrics_recipient_print.items()]) + "\n")
                         if metrics_recipient_succ_print:
                             f.write(f"Recipient Succ: " + " \t".join([f"{k}: {v:.3f}" for k, v in metrics_recipient_succ_print.items()]) + "\n")
-                        f.write(f"Failed Keys Count: {len(failed_keys)}\n")
+                        # New evaluation metrics
+                        f.write(f"\n--- Recipient Burden & Stability Metrics ---\n")
+                        f.write(f"Max Torque (All):  {max_torque_all_mean:.3f}\n")
+                        f.write(f"Max Torque (Succ): {max_torque_succ_mean:.3f}\n")
+                        f.write(f"COM Stability (All):  {com_stability_all_mean:.4f}\n")
+                        f.write(f"COM Stability (Succ): {com_stability_succ_mean:.4f}\n")
+                        f.write(f"COM Stability XY (All):  {com_stability_xy_all_mean:.4f}\n")
+                        f.write(f"COM Stability XY (Succ): {com_stability_xy_succ_mean:.4f}\n")
+                        f.write(f"\nFailed Keys Count: {len(failed_keys)}\n")
                         f.write(f"Network Path: {self.config.get('network_path', '')}\n")
                         f.write(f"Output Directory: {output_dir}\n")
                     

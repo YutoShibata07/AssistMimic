@@ -197,3 +197,6 @@ curriculum_start_epoch: 100       # Start reducing Kp/Kd after this many epochs
 curriculum_duration_epochs: 500  # Duration over which to reduce Kp/Kd to final values
 curriculum_kp_pos_final: 0.0      # Final Kp value (linearly interpolated from initial)
 curriculum_kd_pos_final: 0.0      # Final Kd value (linearly interpolated from initial)
+
+# Caregiver hand reference adjustment (adaptive hand positioning based on recipient's physical simulation)
+enable_adjust_caregiver_hand_reference: true  # Enable/disable caregiver hand reference adjustment
