@@ -42,7 +42,7 @@ class HumanoidAssistBed(HumanoidIm, RSIMixin):
         self.simple_lift_up_mode = cfg["env"].get("simple_lift_up_mode", False)
         self.task_reward_only = cfg["env"].get("task_reward_only", False)
         self.dense_height_reward = cfg["env"].get("dense_height_reward", False)
-        self.recipient_mass_scale = cfg["env"].get("recipient_mass_scale", 0.3)
+        self.recipient_mass_scale = cfg["env"].get("recipient_mass_scale", 0.7)
 
         # Failed motion weighted sampling settings
         self.failed_motion_weight = cfg["env"].get("failed_motion_weight", False)
