@@ -194,6 +194,58 @@
                 <p class="caption">Evaluation of specialist policies on the <strong>Inter-X</strong> dataset.</p>
             </div>
 
+            <!-- HHI-Assist Quantitative Results -->
+            <div class="result-block">
+                <div class="table-wrapper">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th rowspan="2">Method</th>
+                                <th colspan="2">Seen Dynamics</th>
+                                <th colspan="2">Unseen Dynamics</th>
+                            </tr>
+                            <tr>
+                                <th>SR (%)</th>
+                                <th>MPJPE (mm)</th>
+                                <th>Mass ×1.5</th>
+                                <th>Max hip &tau; ×0.5</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="highlight">
+                                <td><strong>AssistMimic (Ours)</strong></td>
+                                <td>85.8</td>
+                                <td>127.0</td>
+                                <td><strong>67.8</strong></td>
+                                <td><strong>73.2</strong></td>
+                            </tr>
+                            <tr>
+                                <td>(-) Dynamic Retargeting</td>
+                                <td>85.4</td>
+                                <td>125</td>
+                                <td>49.1</td>
+                                <td>62.9</td>
+                            </tr>
+                            <tr>
+                                <td>&nbsp;&nbsp;(-) Contact Reward</td>
+                                <td>97.7</td>
+                                <td>89.5</td>
+                                <td>56.4</td>
+                                <td>27.7</td>
+                            </tr>
+                            <tr>
+                                <td>&nbsp;&nbsp;&nbsp;&nbsp;(-) Weight Init</td>
+                                <td>19.1<sup>&dagger;</sup></td>
+                                <td>364<sup>&dagger;</sup></td>
+                                <td>-</td>
+                                <td>-</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="caption">Evaluation of specialist policies on the <strong>HHI-Assist</strong> dataset. <sup>&dagger;</sup> denotes reward-hacking failures.</p>
+            </div>
+
             <!-- Qualitative Results Inter-X -->
             <div class="result-block">
                 <h3>Qualitative Results on Inter-X</h3>
