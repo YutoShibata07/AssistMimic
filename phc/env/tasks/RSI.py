@@ -125,6 +125,11 @@ class RSIMixin:
 
     def _init_rsi(self, cfg):
         """Initialize RSI components"""
+        self._enable_trajectory_rsi = cfg["env"].get("enableTrajectoryRSI", True)
+        if not self._enable_trajectory_rsi:
+            print("Trajectory-based RSI is DISABLED")
+            return
+
         # Initialize Reference State Initialization buffer
         self.trajectory_buffer = TrajectoryBuffer(
             buffer_size=cfg["env"].get("trajectory_buffer_size", 10),
@@ -159,6 +164,8 @@ class RSIMixin:
     
     def _update_env_motion_mapping(self, env_ids):
         """Update the mapping between env_id and motion_unique_id at episode start"""
+        if not self._enable_trajectory_rsi:
+            return
         # Access parent class motion library to get current motion keys
         if hasattr(self, '_motion_lib') and hasattr(self._motion_lib, 'curr_motion_keys'):
             curr_motion_keys = self._motion_lib.curr_motion_keys
@@ -203,6 +210,8 @@ class RSIMixin:
     
     def _start_trajectory_tracking(self, env_ids):
         """Initialize trajectory tracking for new episodes (only for selected envs)"""
+        if not self._enable_trajectory_rsi:
+            return
         for env_id in env_ids:
             env_id_val = env_id.item() if torch.is_tensor(env_id) else env_id
 
@@ -236,6 +245,8 @@ class RSIMixin:
     
     def _capture_trajectory_step(self, env_ids):
         """Capture trajectory data during episode (only for selected envs)"""
+        if not self._enable_trajectory_rsi:
+            return
         # Use no_grad to prevent gradient tracking and memory leaks
         with torch.no_grad():
             # Filter to only tracking environments
@@ -325,6 +336,8 @@ class RSIMixin:
                     Only contains caregiver IDs (even numbers: 0, 2, 4...) from done_indices
             episode_rewards: Full rewards tensor [num_envs] with rewards for ALL environments
         """
+        if not self._enable_trajectory_rsi:
+            return
         stored_count = 0
 
         # Convert to list if tensor
@@ -397,6 +410,8 @@ class RSIMixin:
         Returns a torch.bool mask of shape [len(env_ids)] indicating per-env buffer usage,
         or None if no trajectory_buffer is available.
         """
+        if not self._enable_trajectory_rsi:
+            return None
         if not hasattr(self, 'trajectory_buffer'):
             return None
             

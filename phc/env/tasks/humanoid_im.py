@@ -586,28 +586,34 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         return
     
     def _update_marker(self):
-        if flags.show_traj:
+        # if flags.show_traj:
             
-            motion_times = (self.progress_buf + 1) * self.dt + self._motion_start_times + self._motion_start_times_offset # + 1 for target. 
-            motion_res = self._get_state_from_motionlib_cache(self._sampled_motion_ids, motion_times, self._global_offset)
-            root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, smpl_params, limb_weights, pose_aa, ref_rb_pos, ref_rb_rot, ref_body_vel, ref_body_ang_vel = \
-                    motion_res["root_pos"], motion_res["root_rot"], motion_res["dof_pos"], motion_res["root_vel"], motion_res["root_ang_vel"], motion_res["dof_vel"], \
-                    motion_res["motion_bodies"], motion_res["motion_limb_weights"], motion_res["motion_aa"], motion_res["rg_pos"], motion_res["rb_rot"], motion_res["body_vel"], motion_res["body_ang_vel"]
+        #     motion_times = (self.progress_buf + 1) * self.dt + self._motion_start_times + self._motion_start_times_offset # + 1 for target. 
+        #     motion_res = self._get_state_from_motionlib_cache(self._sampled_motion_ids, motion_times, self._global_offset)
+        #     root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, smpl_params, limb_weights, pose_aa, ref_rb_pos, ref_rb_rot, ref_body_vel, ref_body_ang_vel = \
+        #             motion_res["root_pos"], motion_res["root_rot"], motion_res["dof_pos"], motion_res["root_vel"], motion_res["root_ang_vel"], motion_res["dof_vel"], \
+        #             motion_res["motion_bodies"], motion_res["motion_limb_weights"], motion_res["motion_aa"], motion_res["rg_pos"], motion_res["rb_rot"], motion_res["body_vel"], motion_res["body_ang_vel"]
             
-            self._marker_pos[:] = ref_rb_pos
-            # self._marker_rotation[..., self._track_bodies_id, :] = ref_rb_rot[..., self._track_bodies_id, :]
+        #     self._marker_pos[:] = ref_rb_pos
+        #     # self._marker_rotation[..., self._track_bodies_id, :] = ref_rb_rot[..., self._track_bodies_id, :]
             
-            ## Only update the tracking points. 
-            if flags.real_traj:
-                self._marker_pos[:] = 1000
+        #     ## Only update the tracking points. 
+        #     if flags.real_traj:
+        #         self._marker_pos[:] = 1000
                 
-            self._marker_pos[..., self._track_bodies_id, :] = ref_rb_pos[..., self._track_bodies_id, :]
+        #     self._marker_pos[..., self._track_bodies_id, :] = ref_rb_pos[..., self._track_bodies_id, :]
 
-            if self._occl_training:
-                self._marker_pos[self.random_occlu_idx] = 0
+        #     if self._occl_training:
+        #         self._marker_pos[self.random_occlu_idx] = 0
 
-        else:
-            self._marker_pos[:] = 1000
+        # else:
+        self._marker_pos[:] = 1000
+        self.gym.set_actor_root_state_tensor_indexed(
+          self.sim,
+          gymtorch.unwrap_tensor(self._root_states),
+          gymtorch.unwrap_tensor(self._marker_actor_ids),
+          len(self._marker_actor_ids)
+        )
 
         # ######### Heading debug #######
         # points = self.init_root_points()

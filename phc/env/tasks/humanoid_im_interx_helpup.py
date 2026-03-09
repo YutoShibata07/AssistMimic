@@ -533,17 +533,23 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
     def _update_marker(self):
         """Override to apply pair positioning for markers"""
         # Call parent method first
-        super()._update_marker()
+        # super()._update_marker()
         
-        # Apply the same offset to recipient markers
-        if hasattr(self, '_marker_pos') and hasattr(self, 'cfg'):
-            offset = self.cfg["env"].get('env_spacing', 5.0) * 2
-            pair_offset = torch.tensor([-offset, 0.0, 0.0], device=self.device, dtype=self._marker_pos.dtype)
+        # # Apply the same offset to recipient markers
+        # if hasattr(self, '_marker_pos') and hasattr(self, 'cfg'):
+        #     offset = self.cfg["env"].get('env_spacing', 5.0) * 2
+        #     pair_offset = torch.tensor([-offset, 0.0, 0.0], device=self.device, dtype=self._marker_pos.dtype)
             
-            # Apply offset to recipient environments (odd env_ids)
-            recipient_envs = [env_id for env_id in range(self.num_envs) if env_id % 2 == 1]
-            self._marker_pos[recipient_envs] += pair_offset.unsqueeze(0)
-        
+        #     # Apply offset to recipient environments (odd env_ids)
+        #     recipient_envs = [env_id for env_id in range(self.num_envs) if env_id % 2 == 1]
+        #     self._marker_pos[recipient_envs] += pair_offset.unsqueeze(0)
+        self._marker_pos[:] = 1000
+        self.gym.set_actor_root_state_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self._root_states),
+            gymtorch.unwrap_tensor(self._marker_actor_ids),
+            len(self._marker_actor_ids)
+        )
         return
 
 
