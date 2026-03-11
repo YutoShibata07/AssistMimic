@@ -99,6 +99,10 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         self.curriculum_kp_pos_final = cfg["env"].get("curriculum_kp_pos_final", 0.0)
         self.curriculum_kd_pos_final = cfg["env"].get("curriculum_kd_pos_final", 0.0)
 
+        # Caregiver hand reference adjustment setting
+        self.enable_adjust_caregiver_hand_reference = cfg["env"].get("enable_adjust_caregiver_hand_reference", False)
+        print(f"Enable adjust caregiver hand reference: {self.enable_adjust_caregiver_hand_reference}")
+
         print(f"Recipient assist: {self.recipient_assist_enabled}")
         if self.recipient_assist_enabled:
             print(f"  - Kp_pos: {self.recipient_assist_kp_pos}, Kd_pos: {self.recipient_assist_kd_pos}")
@@ -172,6 +176,12 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
 
         # Previous actions for aux_features (initialized after parent class sets num_actions)
         self.prev_actions = torch.zeros(self.num_envs, self.num_actions, device=self.device)
+
+        # Evaluation metrics tracking (for im_eval mode) - recipients only
+        num_recipients = self.num_envs // 2
+        self.episode_max_torques = torch.zeros(num_recipients, device=self.device, dtype=torch.float)
+        self.episode_com_positions = []
+        self._init_body_masses()
 
         # Kinematic replay: cache recipient env/actor IDs
         if self.recipient_kinematic_replay:
@@ -1612,7 +1622,8 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         #     ref_body_ang_vel_subset[:, track_idx] = body_ang_vel_subset[:, track_idx]
 
         # Adjust caregiver hand reference positions based on recipient's physical simulation position
-        # ref_rb_pos_subset = self._adjust_caregiver_hand_reference(env_ids, ref_rb_pos_subset, motion_res)
+        if self.enable_adjust_caregiver_hand_reference:
+            ref_rb_pos_subset = self._adjust_caregiver_hand_reference(env_ids, ref_rb_pos_subset, motion_res)
 
         # Compute observations using the modified references
         root_pos = body_pos[..., 0, :]
@@ -2834,6 +2845,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         # Track recipient torques at each step during testing
         if flags.test and flags.im_eval:
             self._track_recipient_torques()
+            self._track_evaluation_metrics()
     
     def _reset_envs(self, env_ids):
         """Override to start trajectory tracking for reset environments"""
@@ -3242,3 +3254,102 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
                         
                         # Clear buffer for this environment
                         self.recipient_torque_buffer = [data for data in self.recipient_torque_buffer if data['env_id'] != env_id.item()]
+
+    def _init_body_masses(self):
+        """Initialize body masses tensor for COM calculation (recipient only)"""
+        if not hasattr(self, 'humanoid_masses') or len(self.humanoid_masses) == 0:
+            raise RuntimeError("humanoid_masses not initialized. Cannot compute COM for evaluation.")
+
+        if len(self.envs) == 0 or len(self.humanoid_handles) == 0:
+            raise RuntimeError("envs or humanoid_handles not initialized. Cannot compute COM for evaluation.")
+
+        # Get rigid body properties from first recipient (index 1)
+        # In HHI-assist: even indices are caregivers, odd indices are recipients
+        recipient_env_idx = 1 if len(self.envs) > 1 else 0
+        props = self.gym.get_actor_rigid_body_properties(self.envs[recipient_env_idx], self.humanoid_handles[recipient_env_idx])
+        self._body_masses = torch.tensor([prop.mass for prop in props], device=self.device, dtype=torch.float)
+        self._total_body_mass = self._body_masses.sum()
+
+    def _compute_recipient_com(self):
+        """
+        Compute Center of Mass (COM) for recipient environments only.
+
+        Returns:
+            torch.Tensor: COM positions for recipients [num_recipients, 3]
+        """
+        # Get recipient environment IDs (odd indices)
+        recipient_env_ids = torch.arange(1, self.num_envs, 2, device=self.device, dtype=torch.long)
+
+        # Get body positions for recipient environments: [num_recipients, num_bodies, 3]
+        body_pos = self._rigid_body_pos[recipient_env_ids]
+
+        # Compute weighted sum: COM = sum(mass_i * pos_i) / total_mass
+        # body_pos: [num_recipients, num_bodies, 3], _body_masses: [num_bodies]
+        weighted_pos = body_pos * self._body_masses.view(1, -1, 1)  # [num_recipients, num_bodies, 3]
+        com = weighted_pos.sum(dim=1) / self._total_body_mass  # [num_recipients, 3]
+
+        return com
+
+    def _track_evaluation_metrics(self):
+        """
+        Track evaluation metrics (max torque, COM position) for recipients at each step.
+
+        All metrics are computed for recipient environments only (odd indices).
+        In im_eval mode, terminated episodes continue running until batch completes,
+        so data after termination is included. Use 'succ' filtered metrics for accuracy.
+        """
+        # Get recipient environment IDs (odd indices)
+        recipient_env_ids = torch.arange(1, self.num_envs, 2, device=self.device, dtype=torch.long)
+        num_recipients = len(recipient_env_ids)
+
+        if num_recipients == 0:
+            raise RuntimeError("No recipient environments found. Requires paired environments.")
+
+        # Track max torque for recipients
+        recipient_torques = self.dof_force_tensor[recipient_env_ids]  # [num_recipients, num_dofs]
+        # Compute torque magnitude per recipient (L2 norm across all DOFs)
+        torque_magnitudes = torch.norm(recipient_torques, dim=1)  # [num_recipients]
+        # Update episode max torques (indexed by recipient index, not env_id)
+        self.episode_max_torques = torch.maximum(self.episode_max_torques, torque_magnitudes)
+
+        # Track COM positions for recipients only
+        com_positions = self._compute_recipient_com()  # [num_recipients, 3]
+        self.episode_com_positions.append(com_positions.clone())
+
+    def get_episode_evaluation_metrics(self):
+        """
+        Get evaluation metrics for completed episodes (recipients only).
+        Called from im_amp_players.py when episodes end.
+
+        Returns:
+            dict: Dictionary containing (all for recipients only):
+                - 'max_torques': tensor of max torques per recipient [num_recipients]
+                - 'com_stability': tensor of COM stability (std) per recipient [num_recipients]
+                - 'com_stability_xy': tensor of COM stability in xy plane per recipient [num_recipients]
+        """
+        num_recipients = self.num_envs // 2
+        metrics = {
+            'max_torques': self.episode_max_torques.clone(),  # [num_recipients]
+            'com_stability': torch.zeros(num_recipients, device=self.device),
+            'com_stability_xy': torch.zeros(num_recipients, device=self.device),
+        }
+
+        if len(self.episode_com_positions) > 1:
+            # Stack COM positions: [num_steps, num_recipients, 3]
+            com_stack = torch.stack(self.episode_com_positions, dim=0)
+
+            # COM stability = std of COM position over episode (lower = more stable)
+            # This captures how much the COM "sways" during the episode
+            com_std = torch.std(com_stack, dim=0)  # [num_recipients, 3]
+            metrics['com_stability'] = com_std.norm(dim=1)  # [num_recipients]
+            metrics['com_stability_xy'] = com_std[:, :2].norm(dim=1)  # [num_recipients], xy plane only
+
+        return metrics
+
+    def reset_episode_evaluation_metrics(self):
+        """Reset evaluation metrics for all recipients (called on batch reset)."""
+        num_recipients = self.num_envs // 2
+        # Reset max torques for all recipients
+        self.episode_max_torques = torch.zeros(num_recipients, device=self.device, dtype=torch.float)
+        # Clear COM position history
+        self.episode_com_positions = []
