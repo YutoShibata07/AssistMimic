@@ -31,7 +31,7 @@ Make sure that all four setup steps are completed successfully.
 
 # Train tracking policy
 ```bash
-python phc/run_hydra.py env=env_im_interx_helpup learning=im_simpleliftup_mlp exp_name=g-cluster-0-n10-assistmimic-cvpr2026 test=False headless=True robot=smplx_humanoid robot.freeze_hand=False robot.box_body=False
+python phc/run_hydra.py env=env_im_interx_helpup learning=im_simpleliftup_mlp exp_name=g-cluster-1-n10-assistmimic-cvpr2026 test=False headless=True robot=smplx_humanoid robot.freeze_hand=False robot.box_body=False env.interx_data_path="sample_data/interx_processed_fixed_v9_cluster_ids_1_n_clusters_10.pkl"
 ```
 
 # Evaluate Tracking Policy
