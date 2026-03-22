@@ -171,6 +171,12 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         # Initialize torque tracking for recipient joints
         self.recipient_torque_buffer = []  # List to store torque data for each step
         self.current_motion_filename = None  # Current motion filename for saving
+
+        # Initialize rollout data buffer for saving successful rollouts
+        # Key: env_id, Value: list of step data dicts
+        self.rollout_data_buffer = {}
+        # Track which motion_ids have already been saved to avoid duplicates
+        self.saved_motion_ids = set()
         if self.caregiver_assist_enabled:
             self.caregiver_assist_rb_forces = torch.zeros((self._rigid_body_state.shape[0], 3), device=self.device, dtype=torch.float)
 
@@ -2841,11 +2847,20 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         if hasattr(self, 'trajectory_tracking_env_ids') and len(self.trajectory_tracking_env_ids) > 0:
             all_env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
             self._capture_trajectory_step(all_env_ids)
-            
+
         # Track recipient torques at each step during testing
         if flags.test and flags.im_eval:
             self._track_recipient_torques()
             self._track_evaluation_metrics()
+
+        # Track rollout data for saving successful rollouts
+        if flags.save_rollout:
+            self._track_rollout_data()
+
+        # Save recipient PHC observations for comparison
+        import os
+        if os.environ.get("SAVE_RECIPIENT_OBS", "0") == "1":
+            self._save_recipient_phc_obs()
     
     def _reset_envs(self, env_ids):
         """Override to start trajectory tracking for reset environments"""
@@ -2900,7 +2915,7 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
     def _is_validation_step(self):
         """
         Check if we're currently in a validation step based on epoch_num.
-        
+
         Returns:
             bool: True if this is a validation step (epoch_num % save_frequency == 0)
         """
@@ -2913,6 +2928,120 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         except Exception as e:
             raise e
 
+    def _save_recipient_phc_obs(self):
+        """Save recipient self_obs + task_obs for comparison with holosoma.
+
+        Saves PHC-style observation (self_obs + task_obs = 778 + 1248 = 2026 dims).
+        Only saves recipient env (env_id=1) after skipping first 3 frames.
+
+        Uses compute_humanoid_observations_smpl_max + compute_imitation_observations_v6
+        with has_smpl_params=False, has_limb_weight_params=False to match holosoma's
+        recipient_phc_obs (2026 dims).
+        """
+        import os
+        import numpy as np
+        from pathlib import Path
+        import atexit
+        from phc.env.tasks.humanoid import compute_humanoid_observations_smpl_max
+        from phc.env.tasks.humanoid_im import compute_imitation_observations_v6
+
+        # Initialize storage if needed
+        if not hasattr(self, '_saved_recipient_obs'):
+            self._saved_recipient_obs = []
+            self._obs_frame_count = 0
+            # Register atexit handler to save on exit
+            atexit.register(self._finalize_recipient_obs_save)
+
+        self._obs_frame_count += 1
+
+        # Skip first 3 frames (spawn initialization)
+        if self._obs_frame_count <= 3:
+            return
+
+        # Get recipient states (env_id=1)
+        recipient_env_id = torch.tensor([1], device=self.device, dtype=torch.long)
+
+        # Body states for recipient
+        body_pos = self._rigid_body_pos[recipient_env_id]      # (1, J, 3)
+        body_rot = self._rigid_body_rot[recipient_env_id]      # (1, J, 4)
+        body_vel = self._rigid_body_vel[recipient_env_id]      # (1, J, 3)
+        body_ang_vel = self._rigid_body_ang_vel[recipient_env_id]  # (1, J, 3)
+
+        # Compute self_obs using PHC's exact function (778 dims)
+        smpl_params = torch.zeros(1, 11, device=self.device)  # Dummy, not used
+        limb_weight_params = torch.zeros(1, 10, device=self.device)  # Dummy, not used
+        self_obs = compute_humanoid_observations_smpl_max(
+            body_pos, body_rot, body_vel, body_ang_vel,
+            smpl_params, limb_weight_params,
+            local_root_obs=True,
+            root_height_obs=True,
+            upright=self._has_upright_start,
+            has_smpl_params=False,
+            has_limb_weight_params=False
+        )  # (1, 778)
+
+        # Get reference states for task_obs
+        time_steps = 1  # Single frame
+        motion_times = (self.progress_buf[recipient_env_id] + 1) * self.dt + \
+                       self._motion_start_times[recipient_env_id] + \
+                       self._motion_start_times_offset[recipient_env_id]
+        motion_res = self._get_state_from_motionlib_cache(
+            self._sampled_motion_ids[recipient_env_id],
+            motion_times,
+            self._global_offset[recipient_env_id]
+        )
+
+        ref_body_pos = motion_res["rg_pos"]
+        ref_body_rot = motion_res["rb_rot"]
+        ref_body_vel = motion_res["body_vel"]
+        ref_body_ang_vel = motion_res["body_ang_vel"]
+
+        root_pos = body_pos[:, 0, :]
+        root_rot = body_rot[:, 0, :]
+
+        # Compute task_obs using PHC's exact function (1248 dims)
+        task_obs = compute_imitation_observations_v6(
+            root_pos, root_rot, body_pos, body_rot, body_vel, body_ang_vel,
+            ref_body_pos, ref_body_rot, ref_body_vel, ref_body_ang_vel,
+            time_steps, self._has_upright_start
+        )  # (1, 1248)
+
+        # Concatenate to get PHC-style observation (2026 dims)
+        phc_obs = torch.cat([self_obs, task_obs], dim=-1)  # (1, 2026)
+        self._saved_recipient_obs.append(phc_obs[0].cpu().numpy())
+
+        # Print progress every 50 frames
+        if len(self._saved_recipient_obs) % 50 == 0:
+            print(f"[OBS SAVE] Collected {len(self._saved_recipient_obs)} frames (shape: {phc_obs.shape})")
+
+        # Also save raw quaternions for debugging (first 3 frames only)
+        if len(self._saved_recipient_obs) <= 3:
+            print(f"[DEBUG] Frame {len(self._saved_recipient_obs)}: root_rot = {body_rot[0, 0].cpu().numpy()}")
+            print(f"[DEBUG] Frame {len(self._saved_recipient_obs)}: root_pos = {body_pos[0, 0].cpu().numpy()}")
+
+        # Save to file when motion ends (check progress_buf)
+        max_steps = int(os.environ.get("MAX_SAVE_STEPS", "200"))
+        if len(self._saved_recipient_obs) >= max_steps:
+            self._finalize_recipient_obs_save()
+
+    def _finalize_recipient_obs_save(self):
+        """Finalize and save recipient observations to file."""
+        import numpy as np
+        from pathlib import Path
+
+        if not hasattr(self, '_saved_recipient_obs') or len(self._saved_recipient_obs) == 0:
+            return
+
+        output_dir = Path("obs_comparison")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        obs_array = np.stack(self._saved_recipient_obs, axis=0)
+        output_path = output_dir / "assistmimic_recipient_obs.npy"
+        np.save(output_path, obs_array)
+        print(f"[OBS SAVE] Saved {obs_array.shape[0]} frames to {output_path}")
+        print(f"[OBS SAVE] Shape: {obs_array.shape}")
+
+        # Clear buffer
+        self._saved_recipient_obs = []
 
     def _extract_future_trajectories(self, env_ids, future_frames):
         """
@@ -3353,3 +3482,169 @@ class HumanoidImInterxHelpUp(HumanoidIm, RSIMixin):
         self.episode_max_torques = torch.zeros(num_recipients, device=self.device, dtype=torch.float)
         # Clear COM position history
         self.episode_com_positions = []
+    def _track_rollout_data(self):
+        """Track rollout data (joint angles, root pos/rot) for all environments at each step.
+        Called when flags.save_rollout is True.
+        """
+        all_env_ids = torch.arange(self.num_envs, device=self.device)
+
+        if len(all_env_ids) == 0:
+            return
+
+        # Get data for all environments (GPU -> CPU)
+        all_joint_angles = self._dof_pos.cpu().numpy()  # [num_envs, num_dofs]
+        all_root_positions = self._rigid_body_pos[:, 0, :3].cpu().numpy()  # [num_envs, 3]
+        all_root_rotations_quat = self._rigid_body_rot[:, 0].cpu().numpy()  # [num_envs, 4]
+
+        # Convert quaternion to 6D rotation representation
+        all_root_rotations_6d = quat_to_tan_norm(
+            torch.from_numpy(all_root_rotations_quat)
+        ).numpy()  # [num_envs, 6]
+
+        # Store data for each environment
+        for env_id in range(self.num_envs):
+            # Get motion information
+            current_motion_id = None
+            motion_key = None
+            if hasattr(self._motion_lib, '_curr_motion_ids') and self._motion_lib._curr_motion_ids is not None:
+                if env_id < len(self._motion_lib._curr_motion_ids):
+                    current_motion_id = self._motion_lib._curr_motion_ids[env_id].item()
+                    if hasattr(self._motion_lib, '_motion_data_keys') and current_motion_id < len(self._motion_lib._motion_data_keys):
+                        motion_key = self._motion_lib._motion_data_keys[current_motion_id]
+
+            # Determine role (caregiver=even, recipient=odd)
+            role = "recipient" if env_id % 2 == 1 else "caregiver"
+
+            # Initialize buffer for this env if needed
+            if env_id not in self.rollout_data_buffer:
+                self.rollout_data_buffer[env_id] = []
+
+            self.rollout_data_buffer[env_id].append({
+                'step': self.progress_buf[env_id].item(),
+                'joint_angles': all_joint_angles[env_id].copy(),
+                'root_position': all_root_positions[env_id].copy(),
+                'root_orientation_quat': all_root_rotations_quat[env_id].copy(),
+                'root_orientation_6d': all_root_rotations_6d[env_id].copy(),
+                'motion_id': current_motion_id,
+                'motion_key': motion_key,
+                'role': role,
+            })
+
+    def _save_successful_rollout_data(self, env_ids, terminate_flags):
+        """Save rollout data for successful (non-terminated) environments.
+        Only saves one successful rollout per (motion_name, role) pair.
+
+        Directory structure:
+            output/HumanoidIm/{exp_name}/rollout_data/{motion_name}/{role}/
+                joint_angles.npy
+                root_positions.npy
+                root_orientations_quat.npy
+                root_orientations_6d.npy
+
+        Args:
+            env_ids: Tensor of environment IDs that are being reset
+            terminate_flags: Tensor of boolean flags indicating which envs terminated early
+        """
+        import os
+
+        exp_name = getattr(self.cfg, 'exp_name', 'default_exp')
+        eval_subdir = self.cfg.get('eval_subdir', '')
+        if eval_subdir:
+            base_output_dir = f"output/HumanoidIm/{exp_name}/{eval_subdir}"
+        else:
+            base_output_dir = f"output/HumanoidIm/{exp_name}/rollout_data"
+
+        saved_count = 0
+
+        for i, env_id in enumerate(env_ids):
+            env_id_val = env_id.item()
+
+            # Check if this environment terminated early (failed)
+            is_terminated = terminate_flags[env_id_val].item() if env_id_val < len(terminate_flags) else True
+
+            if env_id_val not in self.rollout_data_buffer:
+                continue
+
+            env_data = self.rollout_data_buffer[env_id_val]
+
+            if len(env_data) <= 5:
+                # Skip short episodes
+                del self.rollout_data_buffer[env_id_val]
+                continue
+
+            motion_id = env_data[0].get('motion_id')
+            motion_key = env_data[0].get('motion_key')
+            role = env_data[0].get('role', 'unknown')
+
+            # Extract motion name from motion_key (remove _caregiver or _recipient suffix)
+            if motion_key is not None and isinstance(motion_key, str):
+                motion_name = os.path.splitext(os.path.basename(motion_key))[0]
+                # Remove role suffix if present
+                if motion_name.endswith('_caregiver'):
+                    motion_name = motion_name[:-10]  # Remove '_caregiver'
+                elif motion_name.endswith('_recipient'):
+                    motion_name = motion_name[:-10]  # Remove '_recipient'
+            else:
+                motion_name = f"motion_{motion_id}"
+
+            # Create unique key for (motion_name, role) pair
+            save_key = f"{motion_name}_{role}"
+
+            # Only save if: (1) not terminated (success), (2) this (motion_name, role) not already saved
+            if not is_terminated and save_key not in self.saved_motion_ids:
+                # Convert to numpy arrays
+                joint_angles = np.array([d['joint_angles'] for d in env_data])  # [T, num_dofs]
+                root_positions = np.array([d['root_position'] for d in env_data])  # [T, 3]
+                root_orientations_quat = np.array([d['root_orientation_quat'] for d in env_data])  # [T, 4]
+                root_orientations_6d = np.array([d['root_orientation_6d'] for d in env_data])  # [T, 6]
+
+                # Create directory structure: rollout_data/{motion_name}/{role}/
+                output_dir = os.path.join(base_output_dir, motion_name, role)
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Save files with simple names
+                np.save(os.path.join(output_dir, "joint_angles.npy"), joint_angles)
+                np.save(os.path.join(output_dir, "root_positions.npy"), root_positions)
+                np.save(os.path.join(output_dir, "root_orientations_quat.npy"), root_orientations_quat)
+                np.save(os.path.join(output_dir, "root_orientations_6d.npy"), root_orientations_6d)
+
+                # Mark this (motion_name, role) as saved
+                self.saved_motion_ids.add(save_key)
+                saved_count += 1
+
+                print(f"[Rollout] Saved {motion_name}/{role}/ from env_{env_id_val} "
+                      f"[{len(self.saved_motion_ids)} unique (motion, role) pairs saved]")
+
+            # Clear buffer for this environment
+            del self.rollout_data_buffer[env_id_val]
+
+        return saved_count
+
+    def get_rollout_save_summary(self):
+        """Return summary of saved rollout data."""
+        # Count unique motion names (without role suffix)
+        motion_names = set()
+        caregiver_count = 0
+        recipient_count = 0
+        for key in self.saved_motion_ids:
+            if key.endswith('_caregiver'):
+                motion_names.add(key[:-10])
+                caregiver_count += 1
+            elif key.endswith('_recipient'):
+                motion_names.add(key[:-10])
+                recipient_count += 1
+
+        # Count complete pairs (both caregiver and recipient saved)
+        complete_pairs = 0
+        for motion in motion_names:
+            if f"{motion}_caregiver" in self.saved_motion_ids and f"{motion}_recipient" in self.saved_motion_ids:
+                complete_pairs += 1
+
+        return {
+            'num_unique_motion_role_pairs': len(self.saved_motion_ids),
+            'num_unique_motions': len(motion_names),
+            'num_complete_pairs': complete_pairs,
+            'num_caregiver': caregiver_count,
+            'num_recipient': recipient_count,
+            'saved_keys': sorted(list(self.saved_motion_ids)),
+        }

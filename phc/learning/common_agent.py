@@ -360,10 +360,45 @@ class CommonAgent(a2c_continuous.A2CAgent):
     def get_action_values(self, obs):
         obs_orig = obs['obs']
         processed_obs = self._preproc_obs(obs['obs'])
+
+        # Save observations to npy for comparison with holosoma
+        import os
+        _save_obs_dir = os.environ.get("ASSISTMIMIC_SAVE_OBS_DIR", "")
+        if _save_obs_dir:
+            if not hasattr(self, '_obs_save_step'):
+                self._obs_save_step = 0
+            if self._obs_save_step < 100:  # Save first 100 steps
+                import numpy as np
+                os.makedirs(_save_obs_dir, exist_ok=True)
+                # Extract recipient observations (even indices for agent 0 = recipient)
+                # Observation layout: [agent0_env0, agent1_env0, agent0_env1, agent1_env1, ...]
+                # num_agents = 2, so recipient is at indices 0, 2, 4, ... (even indices)
+                if hasattr(self, 'num_agents') and self.num_agents == 2:
+                    recipient_obs_raw = obs_orig[0::2, :].cpu().numpy()  # Every other starting from 0
+                    recipient_obs_norm = processed_obs[0::2, :].cpu().numpy()
+                else:
+                    # Single agent case - save all observations
+                    recipient_obs_raw = obs_orig.cpu().numpy()
+                    recipient_obs_norm = processed_obs.cpu().numpy()
+
+                np.save(f"{_save_obs_dir}/assistmimic_recipient_obs_raw_step{self._obs_save_step:04d}.npy", recipient_obs_raw[0])
+                np.save(f"{_save_obs_dir}/assistmimic_recipient_obs_norm_step{self._obs_save_step:04d}.npy", recipient_obs_norm[0])
+
+                if self._obs_save_step == 0:
+                    print(f"[OBS-SAVE] Saving observations to {_save_obs_dir}")
+                    # Save RunningMeanStd parameters
+                    if hasattr(self, 'running_mean_std') and self.running_mean_std is not None:
+                        np.save(f"{_save_obs_dir}/assistmimic_rms_mean.npy",
+                                self.running_mean_std.running_mean.cpu().numpy())
+                        np.save(f"{_save_obs_dir}/assistmimic_rms_var.npy",
+                                self.running_mean_std.running_var.cpu().numpy())
+                        print(f"[OBS-SAVE] Saved RMS mean shape: {self.running_mean_std.running_mean.shape}")
+                self._obs_save_step += 1
+
         self.model.eval()
         input_dict = {
             'is_train': False,
-            'prev_actions': None, 
+            'prev_actions': None,
             'obs' : processed_obs,
             "obs_orig": obs_orig,
             'rnn_states' : self.rnn_states

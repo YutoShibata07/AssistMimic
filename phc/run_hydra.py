@@ -337,6 +337,7 @@ def main(cfg_hydra: DictConfig) -> None:
     flags.add_proj = cfg.add_proj
     flags.has_eval = cfg.has_eval
     flags.trigger_input = False
+    flags.save_rollout = cfg.get('save_rollout', False)  # Flag to save successful rollout data
 
     if cfg.server_mode:
         flags.follow = cfg.follow = True

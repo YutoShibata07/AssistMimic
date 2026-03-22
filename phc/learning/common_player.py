@@ -163,6 +163,45 @@ class CommonPlayer(players.PpoPlayerContinuous):
         return obs_dict
 
     def get_action(self, obs_dict, is_determenistic=False):
+        # Save observations to npy for comparison with holosoma
+        import os
+        _save_obs_dir = os.environ.get("ASSISTMIMIC_SAVE_OBS_DIR", "")
+        if _save_obs_dir:
+            if not hasattr(self, '_obs_save_step'):
+                self._obs_save_step = 0
+            if self._obs_save_step < 100:  # Save first 100 steps
+                import numpy as np
+                os.makedirs(_save_obs_dir, exist_ok=True)
+                obs = obs_dict['obs']
+                # For multi-agent: extract recipient observations (agent 1 = odd indices)
+                if hasattr(self, 'num_agents') and self.num_agents == 2:
+                    recipient_obs_raw = obs[1::2, :].cpu().numpy()  # Recipient at odd indices
+                else:
+                    recipient_obs_raw = obs.cpu().numpy()
+
+                # Get normalized observation
+                if hasattr(self, 'running_mean_std') and self.running_mean_std is not None:
+                    obs_norm = self._preproc_obs(obs)
+                    if hasattr(self, 'num_agents') and self.num_agents == 2:
+                        recipient_obs_norm = obs_norm[1::2, :].cpu().numpy()
+                    else:
+                        recipient_obs_norm = obs_norm.cpu().numpy()
+                else:
+                    recipient_obs_norm = recipient_obs_raw
+
+                np.save(f"{_save_obs_dir}/assistmimic_recipient_obs_raw_step{self._obs_save_step:04d}.npy", recipient_obs_raw[0])
+                np.save(f"{_save_obs_dir}/assistmimic_recipient_obs_norm_step{self._obs_save_step:04d}.npy", recipient_obs_norm[0])
+
+                if self._obs_save_step == 0:
+                    print(f"[OBS-SAVE] Saving observations to {_save_obs_dir}")
+                    if hasattr(self, 'running_mean_std') and self.running_mean_std is not None:
+                        np.save(f"{_save_obs_dir}/assistmimic_rms_mean.npy",
+                                self.running_mean_std.running_mean.cpu().numpy())
+                        np.save(f"{_save_obs_dir}/assistmimic_rms_var.npy",
+                                self.running_mean_std.running_var.cpu().numpy())
+                        print(f"[OBS-SAVE] Saved RMS mean shape: {self.running_mean_std.running_mean.shape}")
+                self._obs_save_step += 1
+
         output = super().get_action(obs_dict['obs'], is_determenistic)
         return output
 
@@ -363,6 +402,45 @@ class CommonPlayerDiscrete(players.PpoPlayerDiscrete):
         return obs_dict
 
     def get_action(self, obs_dict, is_determenistic=False):
+        # Save observations to npy for comparison with holosoma
+        import os
+        _save_obs_dir = os.environ.get("ASSISTMIMIC_SAVE_OBS_DIR", "")
+        if _save_obs_dir:
+            if not hasattr(self, '_obs_save_step'):
+                self._obs_save_step = 0
+            if self._obs_save_step < 100:  # Save first 100 steps
+                import numpy as np
+                os.makedirs(_save_obs_dir, exist_ok=True)
+                obs = obs_dict['obs']
+                # For multi-agent: extract recipient observations (agent 1 = odd indices)
+                if hasattr(self, 'num_agents') and self.num_agents == 2:
+                    recipient_obs_raw = obs[1::2, :].cpu().numpy()  # Recipient at odd indices
+                else:
+                    recipient_obs_raw = obs.cpu().numpy()
+
+                # Get normalized observation
+                if hasattr(self, 'running_mean_std') and self.running_mean_std is not None:
+                    obs_norm = self._preproc_obs(obs)
+                    if hasattr(self, 'num_agents') and self.num_agents == 2:
+                        recipient_obs_norm = obs_norm[1::2, :].cpu().numpy()
+                    else:
+                        recipient_obs_norm = obs_norm.cpu().numpy()
+                else:
+                    recipient_obs_norm = recipient_obs_raw
+
+                np.save(f"{_save_obs_dir}/assistmimic_recipient_obs_raw_step{self._obs_save_step:04d}.npy", recipient_obs_raw[0])
+                np.save(f"{_save_obs_dir}/assistmimic_recipient_obs_norm_step{self._obs_save_step:04d}.npy", recipient_obs_norm[0])
+
+                if self._obs_save_step == 0:
+                    print(f"[OBS-SAVE] Saving observations to {_save_obs_dir}")
+                    if hasattr(self, 'running_mean_std') and self.running_mean_std is not None:
+                        np.save(f"{_save_obs_dir}/assistmimic_rms_mean.npy",
+                                self.running_mean_std.running_mean.cpu().numpy())
+                        np.save(f"{_save_obs_dir}/assistmimic_rms_var.npy",
+                                self.running_mean_std.running_var.cpu().numpy())
+                        print(f"[OBS-SAVE] Saved RMS mean shape: {self.running_mean_std.running_mean.shape}")
+                self._obs_save_step += 1
+
         output = super().get_action(obs_dict['obs'], is_determenistic)
         return output
 

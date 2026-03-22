@@ -6,8 +6,9 @@ class Flags(object):
             setattr(self,key,val)
 
 flags = Flags({
-    'test': False, 
+    'test': False,
     'debug': False,
     "real_traj": False,
     "im_eval": False,
+    "save_rollout": False,  # Flag to save successful rollout data (dof, root pos/rot)
     })

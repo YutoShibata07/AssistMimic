@@ -126,6 +126,11 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                 self.pred_pos_all += all_body_pos_pred
                 self.gt_pos_all += all_body_pos_gt
 
+                # Save successful rollout data if flag is set
+                if flags.save_rollout and hasattr(humanoid_env, '_save_successful_rollout_data'):
+                    all_env_ids = torch.arange(humanoid_env.num_envs, device=self.device)
+                    humanoid_env._save_successful_rollout_data(all_env_ids, self.terminate_state)
+
                 # Collect evaluation metrics (max torque, COM stability) for this batch
                 # Metrics are already recipient-only from get_episode_evaluation_metrics()
                 if hasattr(humanoid_env, 'get_episode_evaluation_metrics'):
@@ -503,6 +508,21 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                     joblib.dump(failed_keys, osp.join(self.config['network_path'], "failed.pkl"))
                     joblib.dump(success_keys, osp.join(self.config['network_path'], "long_succ.pkl"))
                     print("....")
+
+                    # Print rollout save summary if enabled
+                    if flags.save_rollout and hasattr(humanoid_env, 'get_rollout_save_summary'):
+                        summary = humanoid_env.get_rollout_save_summary()
+                        num_total_motions = humanoid_env._motion_lib._num_unique_motions
+                        num_motion_pairs = num_total_motions // 2  # caregiver+recipient pairs
+                        print(f"\n=== Rollout Save Summary ===")
+                        print(f"Total motion pairs in dataset: {num_motion_pairs}")
+                        print(f"Complete pairs saved (both caregiver & recipient): {summary['num_complete_pairs']}")
+                        print(f"Unique motions with at least one role saved: {summary['num_unique_motions']}")
+                        print(f"  - Caregiver: {summary['num_caregiver']}")
+                        print(f"  - Recipient: {summary['num_recipient']}")
+                        print(f"Coverage: {summary['num_complete_pairs']}/{num_motion_pairs} pairs ({100*summary['num_complete_pairs']/num_motion_pairs:.1f}%)")
+                        print(f"Output directory: {output_dir}/rollout_data/{{motion_name}}/{{role}}/")
+                        print("=" * 30)
 
                     # Exit after all motions have been evaluated once
                     print("Evaluation complete. Exiting.")
