@@ -1,0 +1,111 @@
+params:
+  seed: 0
+
+  algo:
+    name: im_amp
+
+  model:
+    name: amp
+
+  network:
+    name: amp_humanx_pnn  # Use humanx PNN builder #amp_assistmimic #
+    separate: True
+    discrete: False
+    weight_share: false  # Separate weights for caregiver and recipient
+    freeze_recipient: false  # Freeze recipient PNN during training (only train caregiver)
+
+    # Ablation: Skip pretrained PHC loading (weights + normalization statistics)
+    load_pretrained_phc: false
+
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: -2.9
+        # Role-based sigma configuration
+        role_sigma:
+          caregiver_val: -2.9
+          recipient_val: -2.9
+        fixed_sigma: True
+        learn_sigma: False
+
+    # PNN configuration (single primitive)
+    mlp:
+      units: [2048, 1536, 1024, 1024, 512, 512]
+      activation: silu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    # Discriminator - Required by amp_network_builder
+    disc:
+      units: [1024, 512]
+      activation: relu
+      initializer:
+        name: default
+
+  # No checkpoint loading (fresh training)
+  load_checkpoint: False
+
+  config:
+    name: Humanoid
+    env_name: rlgpu
+
+    multi_gpu: False  # Use PyTorch DDP instead
+    ppo: True
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    reward_shaper:
+      scale_value: 1
+    normalize_advantage: True
+    gamma: 0.99
+    tau: 0.95
+    learning_rate: 5e-6
+    caregiver_learning_rate: 5e-6
+    recipient_learning_rate: 5e-6
+    lr_schedule: constant
+    score_to_win: 20000
+    max_epochs: 10000000
+    save_best_after: 50
+    save_frequency: 50
+    print_stats: False
+    save_intermediate: True
+    entropy_coef: 0.0
+    truncate_grads: True
+    grad_norm: 50.0
+    e_clip: 0.2
+    horizon_length: 32
+    minibatch_size: 8192
+    mini_epochs: 6
+    critic_coef: 5
+    clip_value: False
+
+    bounds_loss_coef: 10
+
+    # Reward configuration
+    task_reward_w: 0.5  # Tracking + recipient height + contact rewards
+    disc_reward_w: 0.5  # Discriminator reward
+
+    # AMP settings
+    amp_obs_demo_buffer_size: 200000
+    amp_replay_buffer_size: 200000
+    amp_replay_keep_prob: 0.01
+    amp_batch_size: 512
+    amp_minibatch_size: 4096
+    disc_coef: 5
+    disc_logit_reg: 0.01
+    disc_grad_penalty: 5
+    disc_reward_scale: 2
+    disc_weight_decay: 0.0001
+    normalize_amp_input: True
+
+    player:
+      games_num: 50000000

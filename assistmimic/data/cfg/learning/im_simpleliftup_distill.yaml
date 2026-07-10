@@ -1,0 +1,155 @@
+params:
+  seed: 0
+
+  algo:
+    name: im_amp_distill
+
+  model:
+    name: amp
+
+  network:
+    name: amp_pnn_multi
+    separate: True
+    discrete: False
+    weight_share: false  # Separate weights for caregiver and recipient
+
+    space:
+      continuous:
+        mu_activation: null
+        sigma_activation: null
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: -2.9
+        # Role-based sigma configuration
+        role_sigma:
+          caregiver_val: -2.9
+          recipient_val: -2.9
+        fixed_sigma: True
+        learn_sigma: False
+
+    # PNN configuration (main network for self + task obs)
+    mlp:
+      units: [2048, 1536, 1024, 1024, 512, 512]
+      activation: silu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    # Aux MLP configuration (for contact and partner features)
+    aux_mlp:
+      units: [2048, 1536, 1024, 1024, 512, 512]
+      activation: silu
+      output_size: 153
+      zero_init: False
+      debug_interval: 1000
+
+    # Finger joint filtering for aux_mlp input
+    filter_finger_joints: false
+
+    # Asymmetric critic configuration
+    asymmetric_critic: false
+
+    # Discriminator - Required by amp_network_builder but disabled for SimpleLiftUp
+    disc:
+      units: [1024, 512]
+      activation: relu
+      initializer:
+        name: default
+
+  # No checkpoint loading for distillation (train from scratch with teacher guidance)
+  load_checkpoint: False
+
+  config:
+    name: Humanoid
+    env_name: rlgpu
+    multi_gpu: False  # Disable rl_games multi_gpu, use PyTorch DDP instead
+    ppo: True
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    reward_shaper:
+      scale_value: 1
+    normalize_advantage: True
+    gamma: 0.99
+    tau: 0.95
+    learning_rate: 2e-5  # Learning rate for fresh training
+    caregiver_learning_rate: 2e-5  # Learning rate for caregiver policy
+    recipient_learning_rate: 2e-5  # Learning rate for recipient policy
+    lr_schedule: constant
+    score_to_win: 20000
+    max_epochs: 10000000
+    save_best_after: 50
+    save_frequency: 50  # Save checkpoints every 50 iterations
+    print_stats: False
+    save_intermediate: True
+    entropy_coef: 0.0  # No entropy bonus (using teacher guidance)
+    truncate_grads: True
+    grad_norm: 50.0
+    e_clip: 0.2
+    horizon_length: 32
+    minibatch_size: 8192
+    mini_epochs: 6
+    critic_coef: 5
+    clip_value: False
+
+    bounds_loss_coef: 10
+
+    # Knowledge distillation specific settings
+    expert_loss_coef: 1.0  # Coefficient for supervised learning loss
+
+    # Curriculum schedule configuration (DAgger + PPO)
+    # To start with PPO + supervised learning from the beginning:
+    # Set stage1_end_epoch=0, stage2_start_epoch=0, stage2_end_epoch=0,
+    # stage3_start_epoch=0, stage4_start_epoch=0, ev_win_streak=0
+    curriculum:
+      # DAgger beta decay schedule
+      dagger_beta_start_epoch: 400    # Start decaying beta from this epoch
+      dagger_beta_end_epoch: 1000     # Beta reaches 0 at this epoch
+
+      # Stage 1: Pure imitation learning
+      # Set to 0 to skip pure imitation stage
+      stage1_end_epoch: 1000             # 0 = skip this stage, start with PPO immediately
+
+      # Stage 2: Expert + Critic learning
+      # Set both to 0 to include critic from the start
+      stage2_start_epoch: 1000           # 0 = include critic from the start
+      stage2_end_epoch: 1200             # 0 = no ramp-up, full weight immediately
+
+      # Stage 3: Monitor critic explained variance
+      # Set to 0 to skip monitoring (always allow actor updates)
+      stage3_start_epoch: 1200           # 0 = monitor from the start
+      stage3_end_epoch: 1300             # Not used if stage4_start_epoch=0
+      ev_threshold: 0.6               # Not used if ev_win_streak=0
+      ev_win_streak: 3                # 0 = no EV check, allow actor immediately
+
+      # Stage 4: Full RL with actor updates
+      # Set to 0 to enable actor updates from the start
+      stage4_start_epoch: 1300           # 0 = enable actor from the start
+      actor_rampup_steps: 1000        # Steps to ramp up actor weight from 0 to 1
+      expert_decay_steps: 1000        # Steps to decay expert weight from 1 to min
+      expert_min_weight: 0.1          # Minimum expert weight after decay
+
+    # SimpleLiftUp reward configuration
+    task_reward_w: 0.5  # Combined: tracking + recipient height + contact rewards
+    disc_reward_w: 0.0  # DISABLED: No discriminator reward
+
+    # AMP settings (minimal for compatibility)
+    amp_obs_demo_buffer_size: 200000
+    amp_replay_buffer_size: 200000
+    amp_replay_keep_prob: 0.01
+    amp_batch_size: 512
+    amp_minibatch_size: 4096
+    disc_coef: 5
+    disc_logit_reg: 0.01
+    disc_grad_penalty: 5
+    disc_reward_scale: 2
+    disc_weight_decay: 0.0001
+    normalize_amp_input: True
+
+    player:
+      games_num: 50000000

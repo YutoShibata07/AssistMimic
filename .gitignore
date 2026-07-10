@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore everything in output
+/output/*
+
+# Distributed via Google Drive (see README)
+/checkpoints/
+/sample_data/
+
+# Experiment logs and local artifacts
+/wandb/
+/data/
+/obs_comparison/
+/obs_comparison_new/
+
+# Not published (kept locally)
+/paper_results/
