@@ -106,6 +106,33 @@ python assistmimic/run_hydra.py env=env_im_interx_helpup learning=im_simpleliftu
 python assistmimic/run_hydra.py env=env_im_hhi-assist learning=im_hhi-assist_mlp exp_name=hhi-assist-assistmimic-cvpr2026 test=False headless=True robot=smplx_humanoid robot.freeze_hand=False robot.box_body=False ++env.hhi_assist_bed_data_path="sample_data/hhi-assist_processed_v6_AA-RM-wo-FullAssist.pkl"
 ```
 
+# Train Generalist Policy (DAgger distillation)
+
+The generalist policy (Table 4) is a single policy distilled from per-cluster specialist policies over 30 diverse interaction clips. Training has two stages.
+
+**Stage 1 — Collect expert rollouts.** Run each trained specialist in evaluation mode with `+save_rollout=True` to dump its successful trajectories:
+
+```bash
+python assistmimic/run_hydra.py env=env_im_interx_helpup learning=im_simpleliftup_mlp \
+  exp_name=g-cluster-0-n10-ours-v14-adj \
+  test=True im_eval=True headless=True epoch=-1 env.num_envs=1000 \
+  robot=smplx_humanoid robot.freeze_hand=False robot.box_body=False \
+  ++env.interx_data_path=sample_data/interx_processed_fixed_v9_cluster_ids_0_1_2_4_n_clusters_10.pkl \
+  ++env.recipient_mass_scale=0.7 ++env.terminationDistance=0.5 \
+  eval_subdir=rollout_normal +save_rollout=True
+```
+
+**Stage 2 — Distill into a single generalist policy** using the distillation env/learning configs (the student is trained from scratch with teacher guidance):
+
+```bash
+python assistmimic/run_hydra.py env=env_im_interx_helpup_distill learning=im_helpup_distill \
+  exp_name=g-cluster_0_1_2_4_n_clusters_10-cvpr2026-dagger \
+  test=False headless=True robot=smplx_humanoid robot.freeze_hand=False robot.box_body=False \
+  ++env.interx_data_path=sample_data/interx_processed_fixed_v9_cluster_ids_0_1_2_4_n_clusters_10.pkl
+```
+
+Visualize the distilled generalist with `bash scripts/visualize_policy.sh` (see [Visualize Generalist Policy](#visualize-generalist-policy-30-motions)).
+
 ---
 
 ## Other Training Modes
