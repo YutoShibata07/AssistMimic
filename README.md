@@ -108,21 +108,11 @@ python assistmimic/run_hydra.py env=env_im_hhi-assist learning=im_hhi-assist_mlp
 
 # Train Generalist Policy (DAgger distillation)
 
-The generalist policy (Table 4) is a single policy distilled from per-cluster specialist policies over 30 diverse interaction clips. Training has two stages.
+The generalist policy (Table 4) is a single policy distilled online from per-cluster specialist teachers over the 30 combined interaction clips (`interx_processed_fixed_v9_cluster_ids_0_1_2_4_n_clusters_10.pkl`). The student is trained from scratch; at each step the `HumanoidImInterxHelpUpDist` task selects the teacher for the current motion's cluster and supervises the student's actions.
 
-**Stage 1 — Collect expert rollouts.** Run each trained specialist in evaluation mode with `+save_rollout=True` to dump its successful trajectories:
+**Prerequisite — the four per-cluster specialist teachers.** The teacher checkpoints are listed in the `teacher_policies` block of `assistmimic/data/cfg/env/env_im_interx_helpup_distill.yaml`, each expected at `output/HumanoidIm/g-cluster-{0,1,2,4}-...`. Train one specialist per cluster with the [specialist training command](#train-tracking-policy) (varying `cluster_ids_{0,1,2,4}`), or edit the block to point at your own checkpoints.
 
-```bash
-python assistmimic/run_hydra.py env=env_im_interx_helpup learning=im_simpleliftup_mlp \
-  exp_name=g-cluster-0-n10-ours-v14-adj \
-  test=True im_eval=True headless=True epoch=-1 env.num_envs=1000 \
-  robot=smplx_humanoid robot.freeze_hand=False robot.box_body=False \
-  ++env.interx_data_path=sample_data/interx_processed_fixed_v9_cluster_ids_0_1_2_4_n_clusters_10.pkl \
-  ++env.recipient_mass_scale=0.7 ++env.terminationDistance=0.5 \
-  eval_subdir=rollout_normal +save_rollout=True
-```
-
-**Stage 2 — Distill into a single generalist policy** using the distillation env/learning configs (the student is trained from scratch with teacher guidance):
+**Distillation.** Once the four teachers are in place, run the single distillation command:
 
 ```bash
 python assistmimic/run_hydra.py env=env_im_interx_helpup_distill learning=im_helpup_distill \
@@ -131,7 +121,7 @@ python assistmimic/run_hydra.py env=env_im_interx_helpup_distill learning=im_hel
   ++env.interx_data_path=sample_data/interx_processed_fixed_v9_cluster_ids_0_1_2_4_n_clusters_10.pkl
 ```
 
-Visualize the distilled generalist with `bash scripts/visualize_policy.sh` (see [Visualize Generalist Policy](#visualize-generalist-policy-30-motions)).
+To evaluate or visualize the released distilled policy instead of retraining, use `bash scripts/visualize_policy.sh` (see [Visualize Generalist Policy](#visualize-generalist-policy-30-motions)).
 
 ---
 
